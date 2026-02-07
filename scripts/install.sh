@@ -141,9 +141,9 @@ install() {
     mv "$bin_path" "${install_dir}/${BINARY_NAME}"
 
     # Verify
-    if command -v "$BINARY_NAME" &>/dev/null; then
+    if [ -x "${install_dir}/${BINARY_NAME}" ]; then
         success "Installed ${BINARY_NAME} ${version} to ${install_dir}/${BINARY_NAME}"
-        "$BINARY_NAME" --version
+        "${install_dir}/${BINARY_NAME}" --version
     else
         success "Installed to ${install_dir}/${BINARY_NAME}"
         warn "Make sure ${install_dir} is in your PATH."
