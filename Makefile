@@ -12,11 +12,11 @@ LDFLAGS  := -s -w \
 
 ## build: Build the binary
 build:
-	go build -ldflags "$(LDFLAGS)" -o $(BINARY) .
+	go build -ldflags "$(LDFLAGS)" -o $(BINARY) ./cmd/bdy
 
 ## install: Build and install to GOPATH/bin
 install:
-	go install -ldflags "$(LDFLAGS)" .
+	go install -ldflags "$(LDFLAGS)" ./cmd/bdy
 
 ## clean: Remove build artifacts
 clean:

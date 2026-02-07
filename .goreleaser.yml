@@ -8,7 +8,7 @@ before:
     - go vet ./...
 
 builds:
-  - main: .
+  - main: ./cmd/bdy
     binary: bdy
     env:
       - CGO_ENABLED=0

@@ -174,7 +174,7 @@ try_go_install() {
     if command -v go &>/dev/null; then
         warn "Falling back to 'go install'..."
         local version="${BDY_VERSION:-latest}"
-        go install -ldflags "-s -w -X 'main.Version=${version}'" "github.com/${REPO_OWNER}/${REPO_NAME}@${version}"
+        go install -ldflags "-s -w -X 'main.Version=${version}'" "github.com/${REPO_OWNER}/${REPO_NAME}/cmd/bdy@${version}"
         success "Installed via go install."
         return 0
     fi
@@ -193,7 +193,7 @@ main() {
         warn "Binary download failed."
         if ! try_go_install; then
             error "Installation failed. Please install manually:"
-            echo "  go install github.com/${REPO_OWNER}/${REPO_NAME}@latest"
+            echo "  go install github.com/${REPO_OWNER}/${REPO_NAME}/cmd/bdy@latest"
             echo "  # or download from: https://github.com/${REPO_OWNER}/${REPO_NAME}/releases"
             exit 1
         fi

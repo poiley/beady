@@ -255,7 +255,7 @@ func goInstall(tag string) error {
 	if ref == "" {
 		ref = "latest"
 	}
-	cmd := exec.Command("go", "install", fmt.Sprintf("github.com/%s/%s@%s", repoOwner, repoName, ref))
+	cmd := exec.Command("go", "install", fmt.Sprintf("github.com/%s/%s/cmd/bdy@%s", repoOwner, repoName, ref))
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {
