@@ -6,7 +6,7 @@
 #   curl -fsSL https://raw.githubusercontent.com/poiley/beady/main/scripts/install.sh | bash
 #
 # Options (via env vars):
-#   BDY_VERSION=v0.2.0  Install a specific version (default: latest)
+#   BDY_VERSION=v1.0.2  Install a specific version (default: latest)
 #   BDY_INSTALL_DIR=/usr/local/bin  Install directory (default: /usr/local/bin or ~/.local/bin)
 #
 set -euo pipefail

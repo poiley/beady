@@ -17,13 +17,16 @@ internal/
   bd/client.go                bd CLI wrapper (exec bd --json, parse response)
   models/issue.go             Data structs matching bd JSON output
   selfupdate/update.go        Self-update via GitHub Releases API
-  ui/styles.go                Lipgloss styles and color theme
+  ui/
+    styles.go                 Lipgloss styles and color theme
+    table.go                  Generic table layout engine (Fixed/Fit/Flex columns, unicode-safe)
   views/
     list.go                   Main list view (table, sort, filter)
     detail.go                 Detail view (single issue, scrollable)
     help.go                   Help overlay (keybindings reference)
 scripts/
   install.sh                  curl-pipe-bash installer
+.goreleaser.yml               Cross-compile + GitHub Release + Homebrew cask config
 ```
 
 ## Build & Test
@@ -50,12 +53,13 @@ Version is embedded via `-ldflags`:
 ## Release Process
 
 ```bash
-git tag v0.X.0
+git tag v1.X.X
 git push origin main --tags
-# Cross-compile and publish:
-goreleaser release --clean
-# Or manually: see Makefile + gh release create
+GITHUB_TOKEN=$(gh auth token) goreleaser release --clean
 ```
+
+GoReleaser cross-compiles for 6 platforms, publishes a GitHub Release, and
+auto-pushes the Homebrew cask to `poiley/homebrew-tap`.
 
 ## Issue Tracking
 

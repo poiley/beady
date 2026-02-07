@@ -6,7 +6,13 @@ Full-screen, keyboard-driven, read-only viewer for your local beads database. De
 
 ## Install
 
-**Pre-built binary** (macOS, Linux, Windows):
+**Homebrew** (macOS):
+
+```bash
+brew install poiley/tap/bdy
+```
+
+**Install script** (macOS, Linux):
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/poiley/beady/main/scripts/install.sh | bash
@@ -86,6 +92,7 @@ Default sort is by **priority** (P0 first), then by **created date** (newest fir
 | `4` | Toggle: closed only |
 | `5` | Toggle: ready (unblocked) only |
 | `0` | Show all statuses |
+| `c` | Toggle: show/hide closed issues (hidden by default) |
 
 ### Actions
 
@@ -134,11 +141,15 @@ internal/
   bd/client.go                bd CLI wrapper (exec + JSON parse)
   models/issue.go             Issue/Comment/Stats structs
   selfupdate/update.go        GitHub Releases self-updater
-  ui/styles.go                k9s-inspired Lipgloss color theme
+  ui/
+    styles.go                 k9s-inspired Lipgloss color theme
+    table.go                  Generic table layout engine (Fixed/Fit/Flex columns)
   views/
     list.go                   Main table view (sort, filter, scroll)
     detail.go                 Single issue detail view
     help.go                   Help overlay
+scripts/
+  install.sh                  curl-pipe-bash installer
 ```
 
 Built with:
@@ -146,6 +157,7 @@ Built with:
 - [Bubble Tea](https://github.com/charmbracelet/bubbletea) - TUI framework
 - [Lipgloss](https://github.com/charmbracelet/lipgloss) - Styling
 - [Bubbles](https://github.com/charmbracelet/bubbles) - Text input component
+- [go-runewidth](https://github.com/mattn/go-runewidth) - Unicode-aware string width
 
 ## Updating
 
@@ -169,20 +181,15 @@ Version, commit hash, and build date are embedded via `-ldflags` from git tags.
 
 ## Releasing
 
-Tag and push:
+Tag, push, and publish with [goreleaser](https://goreleaser.com/):
 
 ```bash
-git tag v0.2.0
+git tag v1.x.x
 git push origin main --tags
+GITHUB_TOKEN=$(gh auth token) goreleaser release --clean
 ```
 
-Then build and publish (with [goreleaser](https://goreleaser.com/) or manually):
-
-```bash
-goreleaser release --clean
-```
-
-Or manually cross-compile and use `gh release create` (see Makefile).
+This cross-compiles for 6 platforms (linux/darwin/windows, amd64/arm64), publishes a GitHub Release, and auto-updates the Homebrew cask in [poiley/homebrew-tap](https://github.com/poiley/homebrew-tap).
 
 ## License
 
