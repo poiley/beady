@@ -87,6 +87,7 @@ type ListView struct {
 	sortField    SortField
 	sortReverse  bool
 	statusFilter StatusFilter
+	hideClosed   bool
 	filterInput  textinput.Model
 	filtering    bool
 	filterText   string
@@ -101,6 +102,7 @@ func NewListView() *ListView {
 	return &ListView{
 		sortField:    SortByPriority,
 		statusFilter: FilterAll,
+		hideClosed:   true,
 		filterInput:  ti,
 		readyIDs:     make(map[string]bool),
 	}
@@ -192,6 +194,9 @@ func (l *ListView) Update(msg tea.Msg) tea.Cmd {
 		case "0":
 			l.statusFilter = FilterAll
 			l.applyFilterAndSort()
+		case "c":
+			l.hideClosed = !l.hideClosed
+			l.applyFilterAndSort()
 		case "/":
 			l.filtering = true
 			l.filterInput.Focus()
@@ -239,6 +244,10 @@ func (l *ListView) applyFilterAndSort() {
 	// Filter
 	var filtered []models.Issue
 	for _, issue := range l.allIssues {
+		// Hide closed by default unless toggled or explicitly filtering for closed
+		if l.hideClosed && l.statusFilter != FilterClosed && issue.Status == "closed" {
+			continue
+		}
 		if !l.matchesStatusFilter(issue) {
 			continue
 		}
@@ -427,6 +436,9 @@ func (l *ListView) renderHeader() string {
 	if l.filterText != "" {
 		filterInfo += "  " + ui.KeyStyle.Render("search:") + " " + ui.KeyDescStyle.Render(l.filterText)
 	}
+	if !l.hideClosed {
+		filterInfo += "  " + ui.KeyDescStyle.Render("+closed")
+	}
 
 	left := logo + "  " + info
 	right := sortInfo + filterInfo
@@ -436,6 +448,18 @@ func (l *ListView) renderHeader() string {
 	return ui.HeaderStyle.Width(l.width).Render(header)
 }
 
+// colIndex constants for referencing columns in styleFn.
+const (
+	colIdxID       = 0
+	colIdxPri      = 1
+	colIdxStatus   = 2
+	colIdxType     = 3
+	colIdxTitle    = 4
+	colIdxAssignee = 5
+	colIdxAge      = 6
+	colIdxDeps     = 7
+)
+
 func (l *ListView) renderTable() string {
 	if len(l.filtered) == 0 {
 		msg := "No issues found."
@@ -443,39 +467,75 @@ func (l *ListView) renderTable() string {
 			msg += " Try clearing filters (press 0 or Esc)."
 		}
 		emptyHeight := max(1, l.height-6)
-		pad := strings.Repeat("\n", emptyHeight/2)
-		return pad + lipgloss.NewStyle().
+		spacer := strings.Repeat("\n", emptyHeight/2)
+		return spacer + lipgloss.NewStyle().
 			Width(l.width).
 			Align(lipgloss.Center).
 			Foreground(ui.ColorGray).
 			Render(msg)
 	}
 
-	// Column widths
-	colID := 12
-	colPri := 4
-	colStatus := 13
-	colType := 9
-	colAge := 6
-	colAssignee := 12
-	colDeps := 5
-	// Title gets the remainder
-	colTitle := max(10, l.width-colID-colPri-colStatus-colType-colAge-colAssignee-colDeps-10)
-
-	// Header row
-	hdr := fmt.Sprintf("  %-*s %-*s %-*s %-*s %-*s %-*s %-*s %s",
-		colID, "ID",
-		colPri, "PRI",
-		colStatus, "STATUS",
-		colType, "TYPE",
-		colTitle, "TITLE",
-		colAssignee, "ASSIGNEE",
-		colAge, "AGE",
-		"DEPS",
+	// Define columns using the generic table engine.
+	tbl := ui.NewTable(
+		&ui.Column{Header: "ID", Size: ui.SizeFit, Align: ui.AlignLeft, Min: 4, Max: 20},
+		&ui.Column{Header: "PRI", Size: ui.SizeFixed, Align: ui.AlignLeft, Fixed: 3},
+		&ui.Column{Header: "STATUS", Size: ui.SizeFit, Align: ui.AlignLeft, Min: 6, Max: 12},
+		&ui.Column{Header: "TYPE", Size: ui.SizeFit, Align: ui.AlignLeft, Min: 4, Max: 10},
+		&ui.Column{Header: "TITLE", Size: ui.SizeFlex, Align: ui.AlignLeft, Min: 10},
+		&ui.Column{Header: "ASSIGNEE", Size: ui.SizeFit, Align: ui.AlignRight, Min: 1, Max: 14},
+		&ui.Column{Header: "AGE", Size: ui.SizeFit, Align: ui.AlignRight, Min: 3, Max: 5},
+		&ui.Column{Header: "DEPS", Size: ui.SizeFit, Align: ui.AlignRight, Min: 4, Max: 7},
 	)
+	tbl.Gap = 1
+
+	// Scan data to compute max display widths per column (for SizeFit columns).
+	// Uses ui.StringWidth to correctly handle wide/multi-byte characters.
+	dataWidths := make([]int, 8)
+	for _, issue := range l.filtered {
+		if n := ui.StringWidth(issue.ID); n > dataWidths[colIdxID] {
+			dataWidths[colIdxID] = n
+		}
+		// PRI is fixed, no scan needed.
+		if n := ui.StringWidth(issue.Status); n > dataWidths[colIdxStatus] {
+			dataWidths[colIdxStatus] = n
+		}
+		if n := ui.StringWidth(issue.IssueType); n > dataWidths[colIdxType] {
+			dataWidths[colIdxType] = n
+		}
+		// TITLE is flex, no scan needed.
+		if n := ui.StringWidth(issue.Assignee); n > dataWidths[colIdxAssignee] {
+			dataWidths[colIdxAssignee] = n
+		}
+		age := models.RelativeAge(issue.CreatedAt)
+		if n := ui.StringWidth(age); n > dataWidths[colIdxAge] {
+			dataWidths[colIdxAge] = n
+		}
+		deps := ""
+		if issue.DependencyCount > 0 || issue.DependentCount > 0 {
+			deps = fmt.Sprintf("%d/%d", issue.DependencyCount, issue.DependentCount)
+		}
+		if n := ui.StringWidth(deps); n > dataWidths[colIdxDeps] {
+			dataWidths[colIdxDeps] = n
+		}
+	}
+	// Ensure assignee column is wide enough for the "-" placeholder.
+	if dataWidths[colIdxAssignee] < 1 {
+		dataWidths[colIdxAssignee] = 1
+	}
+
+	// Reserve 2 chars for the cursor prefix ("  " or "> ").
+	cursorWidth := 2
+	tbl.Resolve(l.width-cursorWidth, dataWidths)
+
+	// Render header row.
+	headers := make([]string, 8)
+	for i, col := range tbl.Columns {
+		headers[i] = col.Header
+	}
+	hdr := "  " + tbl.RenderRow(headers, nil)
 	headerRow := ui.TableHeaderStyle.Width(l.width).Render(hdr)
 
-	// Data rows
+	// Data rows.
 	vis := l.visibleRows()
 	end := min(l.offset+vis, len(l.filtered))
 	var rows []string
@@ -490,13 +550,7 @@ func (l *ListView) renderTable() string {
 			cursor = "> "
 		}
 
-		id := truncate(issue.ID, colID)
-		pri := issue.PriorityString()
-		status := truncate(issue.Status, colStatus)
-		itype := truncate(issue.IssueType, colType)
-		title := truncate(issue.Title, colTitle)
-		age := models.RelativeAge(issue.CreatedAt)
-		assignee := truncate(issue.Assignee, colAssignee)
+		assignee := issue.Assignee
 		if assignee == "" {
 			assignee = "-"
 		}
@@ -505,26 +559,41 @@ func (l *ListView) renderTable() string {
 			deps = fmt.Sprintf("%d/%d", issue.DependencyCount, issue.DependentCount)
 		}
 
-		row := fmt.Sprintf("%s%-*s %-*s %-*s %-*s %-*s %-*s %-*s %s",
-			cursor,
-			colID, id,
-			colPri, ui.PriorityStyle(issue.Priority).Render(pri),
-			colStatus, ui.StatusStyle(issue.Status).Render(status),
-			colType, ui.TypeStyle(issue.IssueType).Render(itype),
-			colTitle, title,
-			colAssignee, assignee,
-			colAge, age,
+		cells := []string{
+			issue.ID,
+			issue.PriorityString(),
+			issue.Status,
+			issue.IssueType,
+			issue.Title,
+			assignee,
+			models.RelativeAge(issue.CreatedAt),
 			deps,
-		)
+		}
+
+		// Style function: pad happens first inside RenderRow, then this
+		// wraps the already-padded plain text in ANSI colors.
+		styleFn := func(col int, padded string) string {
+			switch col {
+			case colIdxPri:
+				return ui.PriorityStyle(issue.Priority).Render(padded)
+			case colIdxStatus:
+				return ui.StatusStyle(issue.Status).Render(padded)
+			case colIdxType:
+				return ui.TypeStyle(issue.IssueType).Render(padded)
+			default:
+				return padded
+			}
+		}
+
+		row := cursor + tbl.RenderRow(cells, styleFn)
 
 		if selected {
 			row = ui.SelectedRowStyle.Width(l.width).Render(row)
 		}
-
 		rows = append(rows, row)
 	}
 
-	// Pad remaining space
+	// Pad remaining space with empty rows.
 	rendered := len(rows) - 1 // subtract header
 	for rendered < vis {
 		rows = append(rows, strings.Repeat(" ", l.width))
@@ -535,6 +604,10 @@ func (l *ListView) renderTable() string {
 }
 
 func (l *ListView) renderStatusBar() string {
+	closedLabel := "show closed"
+	if !l.hideClosed {
+		closedLabel = "hide closed"
+	}
 	keys := []struct{ key, desc string }{
 		{"enter", "view"},
 		{"/", "filter"},
@@ -542,6 +615,7 @@ func (l *ListView) renderStatusBar() string {
 		{"S", "reverse"},
 		{"1-5", "status"},
 		{"0", "all"},
+		{"c", closedLabel},
 		{"r", "refresh"},
 		{"?", "help"},
 		{"q", "quit"},
@@ -552,14 +626,4 @@ func (l *ListView) renderStatusBar() string {
 	}
 	bar := strings.Join(parts, "  ")
 	return ui.StatusBarStyle.Width(l.width).Render(bar)
-}
-
-func truncate(s string, maxLen int) string {
-	if len(s) <= maxLen {
-		return s
-	}
-	if maxLen <= 3 {
-		return s[:maxLen]
-	}
-	return s[:maxLen-3] + "..."
 }

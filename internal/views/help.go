@@ -61,6 +61,7 @@ func (h *HelpView) View() string {
 				{"4", "Toggle: closed only"},
 				{"5", "Toggle: ready (unblocked) only"},
 				{"0", "Show all statuses"},
+				{"c", "Toggle: show/hide closed issues (hidden by default)"},
 			},
 		},
 		{
