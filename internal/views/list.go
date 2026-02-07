@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
@@ -12,6 +13,16 @@ import (
 	"github.com/poiley/beady/internal/models"
 	"github.com/poiley/beady/internal/ui"
 )
+
+const flashDurationValue = 2 * time.Second
+
+// FlashDuration returns the duration before row flashes expire.
+func FlashDuration() time.Duration {
+	return flashDurationValue
+}
+
+// FlashExpiredMsg signals that row flashes should be cleared.
+type FlashExpiredMsg struct{}
 
 // SortField defines what field to sort by.
 type SortField int
@@ -92,6 +103,10 @@ type ListView struct {
 	filtering    bool
 	filterText   string
 	stats        *models.StatsSummary
+
+	// Change tracking for pulse flare on updated rows.
+	prevUpdatedAt map[string]time.Time // issue ID -> UpdatedAt from last data load
+	flashIDs      map[string]bool      // issue IDs currently flashing
 }
 
 // NewListView creates a new list view.
@@ -100,16 +115,48 @@ func NewListView() *ListView {
 	ti.Placeholder = "filter..."
 	ti.CharLimit = 100
 	return &ListView{
-		sortField:    SortByPriority,
-		statusFilter: FilterAll,
-		hideClosed:   true,
-		filterInput:  ti,
-		readyIDs:     make(map[string]bool),
+		sortField:     SortByPriority,
+		statusFilter:  FilterAll,
+		hideClosed:    true,
+		filterInput:   ti,
+		readyIDs:      make(map[string]bool),
+		prevUpdatedAt: make(map[string]time.Time),
+		flashIDs:      make(map[string]bool),
 	}
 }
 
 // SetData updates the issue list and stats.
-func (l *ListView) SetData(issues []models.Issue, readyIssues []models.Issue, stats *models.StatsSummary) {
+// Returns true if any issues changed (and row flashes were triggered).
+func (l *ListView) SetData(issues []models.Issue, readyIssues []models.Issue, stats *models.StatsSummary) bool {
+	// Detect changed rows by comparing UpdatedAt timestamps.
+	hasFlashes := false
+	if len(l.prevUpdatedAt) > 0 {
+		// Build current index
+		currentIDs := make(map[string]bool, len(issues))
+		for _, issue := range issues {
+			currentIDs[issue.ID] = true
+			prev, existed := l.prevUpdatedAt[issue.ID]
+			if !existed || !issue.UpdatedAt.Equal(prev) {
+				l.flashIDs[issue.ID] = true
+				hasFlashes = true
+			}
+		}
+		// Flash newly removed issues? No — they won't render anyway.
+		// Flash newly added issues.
+		for _, issue := range issues {
+			if _, existed := l.prevUpdatedAt[issue.ID]; !existed {
+				l.flashIDs[issue.ID] = true
+				hasFlashes = true
+			}
+		}
+	}
+
+	// Update the index for next comparison.
+	l.prevUpdatedAt = make(map[string]time.Time, len(issues))
+	for _, issue := range issues {
+		l.prevUpdatedAt[issue.ID] = issue.UpdatedAt
+	}
+
 	l.allIssues = issues
 	l.stats = stats
 	l.readyIDs = make(map[string]bool)
@@ -121,6 +168,17 @@ func (l *ListView) SetData(issues []models.Issue, readyIssues []models.Issue, st
 	if l.cursor >= len(l.filtered) {
 		l.cursor = max(0, len(l.filtered)-1)
 	}
+	return hasFlashes
+}
+
+// ClearFlashes removes all active row flashes.
+func (l *ListView) ClearFlashes() {
+	l.flashIDs = make(map[string]bool)
+}
+
+// HasFlashes returns whether any rows are currently flashing.
+func (l *ListView) HasFlashes() bool {
+	return len(l.flashIDs) > 0
 }
 
 // SetSize sets the terminal dimensions.
@@ -589,6 +647,8 @@ func (l *ListView) renderTable() string {
 
 		if selected {
 			row = ui.SelectedRowStyle.Width(l.width).Render(row)
+		} else if l.flashIDs[issue.ID] {
+			row = ui.FlashRowStyle.Width(l.width).Render(row)
 		}
 		rows = append(rows, row)
 	}

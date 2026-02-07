@@ -5,6 +5,7 @@ import (
 	"os/exec"
 	"runtime"
 	"strings"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 
@@ -27,17 +28,21 @@ type dataLoadedMsg struct {
 	readyIssues []models.Issue
 	stats       *models.StatsSummary
 	err         error
+	quiet       bool // true for auto-refresh (don't flash loading screen)
 }
 
 // detailLoadedMsg is sent when a detail view loads.
 type detailLoadedMsg struct {
 	issue *models.Issue
 	err   error
+	quiet bool // true for auto-refresh
 }
 
 // App is the root Bubble Tea model.
 type App struct {
 	client   *bd.Client
+	workDir  string
+	watcher  *dbWatcher
 	list     *views.ListView
 	detail   *views.DetailView
 	help     *views.HelpView
@@ -56,6 +61,8 @@ type App struct {
 func New(workDir string) *App {
 	return &App{
 		client:   bd.NewClient(workDir),
+		workDir:  workDir,
+		watcher:  newDBWatcher(workDir),
 		list:     views.NewListView(),
 		help:     views.NewHelpView(),
 		viewMode: ViewList,
@@ -67,6 +74,7 @@ func New(workDir string) *App {
 func (a *App) Init() tea.Cmd {
 	return tea.Batch(
 		a.loadData(),
+		a.watcher.waitForChange(),
 	)
 }
 
@@ -83,32 +91,74 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.help.SetSize(msg.Width, msg.Height)
 		return a, nil
 
+	case fileChangedMsg:
+		// Database changed on disk — silently reload data in the background.
+		// Don't set a.loading (no loading screen flash).
+		var reloadCmd tea.Cmd
+		switch a.viewMode {
+		case ViewList:
+			reloadCmd = a.loadDataQuiet()
+		case ViewDetail:
+			if a.detail != nil {
+				reloadCmd = a.loadDetailQuiet(a.detail.IssueID())
+			}
+		}
+		// Re-arm the watcher for the next change
+		return a, tea.Batch(reloadCmd, a.watcher.waitForChange())
+
 	case dataLoadedMsg:
-		a.loading = false
+		if !msg.quiet {
+			a.loading = false
+		}
 		if msg.err != nil {
+			// Quiet refreshes silently ignore errors — stale data is better
+			// than flashing an error the user didn't ask for.
+			if msg.quiet {
+				return a, nil
+			}
 			a.err = msg.err
 			return a, nil
 		}
 		a.err = nil
-		a.list.SetData(msg.issues, msg.readyIssues, msg.stats)
+		hasFlashes := a.list.SetData(msg.issues, msg.readyIssues, msg.stats)
+		if hasFlashes {
+			return a, tea.Tick(views.FlashDuration(), func(t time.Time) tea.Msg {
+				return views.FlashExpiredMsg{}
+			})
+		}
+		return a, nil
+
+	case views.FlashExpiredMsg:
+		a.list.ClearFlashes()
 		return a, nil
 
 	case detailLoadedMsg:
-		a.loading = false
+		if !msg.quiet {
+			a.loading = false
+		}
 		if msg.err != nil {
+			if msg.quiet {
+				return a, nil
+			}
 			a.err = msg.err
 			return a, nil
 		}
 		a.err = nil
-		a.detail = views.NewDetailView(msg.issue)
-		a.detail.SetSize(a.width, a.height)
-		a.viewMode = ViewDetail
+		if msg.quiet && a.detail != nil {
+			// Quiet refresh: update the existing detail in-place
+			a.detail.UpdateIssue(msg.issue)
+		} else {
+			a.detail = views.NewDetailView(msg.issue)
+			a.detail.SetSize(a.width, a.height)
+			a.viewMode = ViewDetail
+		}
 		return a, nil
 
 	case tea.KeyMsg:
 		// Global keys
 		switch msg.String() {
 		case "ctrl+c":
+			a.watcher.close()
 			return a, tea.Quit
 		case "q":
 			if a.showHelp {
@@ -122,6 +172,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if a.list.IsFiltering() {
 				// let list handle it
 			} else {
+				a.watcher.close()
 				return a, tea.Quit
 			}
 		case "?":
@@ -247,10 +298,18 @@ func (a *App) View() string {
 }
 
 func (a *App) loadData() tea.Cmd {
+	return a.loadDataWithOpts(false)
+}
+
+func (a *App) loadDataQuiet() tea.Cmd {
+	return a.loadDataWithOpts(true)
+}
+
+func (a *App) loadDataWithOpts(quiet bool) tea.Cmd {
 	return func() tea.Msg {
 		issues, err := a.client.ListAll()
 		if err != nil {
-			return dataLoadedMsg{err: err}
+			return dataLoadedMsg{err: err, quiet: quiet}
 		}
 
 		// Ready and stats are non-fatal if they fail
@@ -261,14 +320,23 @@ func (a *App) loadData() tea.Cmd {
 			issues:      issues,
 			readyIssues: readyIssues,
 			stats:       stats,
+			quiet:       quiet,
 		}
 	}
 }
 
 func (a *App) loadDetail(id string) tea.Cmd {
+	return a.loadDetailWithOpts(id, false)
+}
+
+func (a *App) loadDetailQuiet(id string) tea.Cmd {
+	return a.loadDetailWithOpts(id, true)
+}
+
+func (a *App) loadDetailWithOpts(id string, quiet bool) tea.Cmd {
 	return func() tea.Msg {
 		issue, err := a.client.Show(id)
-		return detailLoadedMsg{issue: issue, err: err}
+		return detailLoadedMsg{issue: issue, err: err, quiet: quiet}
 	}
 }
 

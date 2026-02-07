@@ -17,6 +17,7 @@ var (
 	ColorBg       = lipgloss.Color("#1A1A2E")
 	ColorHeaderBg = lipgloss.Color("#16213E")
 	ColorSelectBg = lipgloss.Color("#0F3460")
+	ColorFlashBg  = lipgloss.Color("#3E3516") // subtle gold tint for changed rows
 	ColorBorder   = lipgloss.Color("#2C3E6D")
 )
 
@@ -51,6 +52,11 @@ var (
 				Bold(true).
 				Background(ColorSelectBg).
 				Foreground(ColorWhite)
+
+	// Flash row (recently changed, k9s-style pulse)
+	FlashRowStyle = lipgloss.NewStyle().
+			Background(ColorFlashBg).
+			Foreground(ColorYellow)
 
 	// Status bar at bottom
 	StatusBarStyle = lipgloss.NewStyle().

@@ -42,6 +42,18 @@ func (d *DetailView) IssueID() string {
 	return d.issue.ID
 }
 
+// UpdateIssue replaces the issue data and re-renders content while
+// preserving the current scroll position (clamped to the new content length).
+func (d *DetailView) UpdateIssue(issue *models.Issue) {
+	d.issue = issue
+	d.buildContent()
+	// Clamp scroll to new content bounds
+	maxScroll := max(0, len(d.lines)-d.visibleLines())
+	if d.scroll > maxScroll {
+		d.scroll = maxScroll
+	}
+}
+
 // Update handles key messages.
 func (d *DetailView) Update(msg tea.Msg) tea.Cmd {
 	switch msg := msg.(type) {
@@ -314,6 +326,7 @@ func (d *DetailView) renderStatusBar() string {
 		{"j/k", "scroll"},
 		{"g/G", "top/bottom"},
 		{"ctrl+d/u", "page"},
+		{"r", "refresh"},
 		{"y", "copy ID"},
 		{"?", "help"},
 		{"q", "quit"},
