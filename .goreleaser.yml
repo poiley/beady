@@ -45,18 +45,19 @@ changelog:
       - "^test:"
       - "^ci:"
 
-brews:
+homebrew_casks:
   - repository:
       owner: poiley
       name: homebrew-tap
     name: bdy
     homepage: "https://github.com/poiley/beady"
     description: "A k9s-style terminal UI for browsing beads issues"
-    license: "MIT"
-    install: |
-      bin.install "bdy"
-    test: |
-      system "#{bin}/bdy", "--version"
+    hooks:
+      post:
+        install: |
+          if OS.mac?
+            system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{staged_path}/bdy"]
+          end
 
 release:
   github:
