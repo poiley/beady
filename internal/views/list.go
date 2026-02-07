@@ -1,0 +1,565 @@
+package views
+
+import (
+	"fmt"
+	"sort"
+	"strings"
+
+	"github.com/charmbracelet/bubbles/textinput"
+	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
+
+	"github.com/poiley/beady/internal/models"
+	"github.com/poiley/beady/internal/ui"
+)
+
+// SortField defines what field to sort by.
+type SortField int
+
+const (
+	SortByPriority SortField = iota
+	SortByCreated
+	SortByUpdated
+	SortByStatus
+	SortByType
+	SortByID
+)
+
+func (s SortField) String() string {
+	switch s {
+	case SortByPriority:
+		return "priority"
+	case SortByCreated:
+		return "created"
+	case SortByUpdated:
+		return "updated"
+	case SortByStatus:
+		return "status"
+	case SortByType:
+		return "type"
+	case SortByID:
+		return "id"
+	default:
+		return "priority"
+	}
+}
+
+// StatusFilter defines which statuses to show.
+type StatusFilter int
+
+const (
+	FilterAll StatusFilter = iota
+	FilterOpen
+	FilterInProgress
+	FilterBlocked
+	FilterClosed
+	FilterReady
+)
+
+func (f StatusFilter) String() string {
+	switch f {
+	case FilterAll:
+		return "all"
+	case FilterOpen:
+		return "open"
+	case FilterInProgress:
+		return "in_progress"
+	case FilterBlocked:
+		return "blocked"
+	case FilterClosed:
+		return "closed"
+	case FilterReady:
+		return "ready"
+	default:
+		return "all"
+	}
+}
+
+// ListView is the main list view model.
+type ListView struct {
+	allIssues    []models.Issue
+	readyIDs     map[string]bool
+	filtered     []models.Issue
+	cursor       int
+	offset       int
+	width        int
+	height       int
+	sortField    SortField
+	sortReverse  bool
+	statusFilter StatusFilter
+	filterInput  textinput.Model
+	filtering    bool
+	filterText   string
+	stats        *models.StatsSummary
+}
+
+// NewListView creates a new list view.
+func NewListView() *ListView {
+	ti := textinput.New()
+	ti.Placeholder = "filter..."
+	ti.CharLimit = 100
+	return &ListView{
+		sortField:    SortByPriority,
+		statusFilter: FilterAll,
+		filterInput:  ti,
+		readyIDs:     make(map[string]bool),
+	}
+}
+
+// SetData updates the issue list and stats.
+func (l *ListView) SetData(issues []models.Issue, readyIssues []models.Issue, stats *models.StatsSummary) {
+	l.allIssues = issues
+	l.stats = stats
+	l.readyIDs = make(map[string]bool)
+	for _, ri := range readyIssues {
+		l.readyIDs[ri.ID] = true
+	}
+	l.applyFilterAndSort()
+	// Clamp cursor
+	if l.cursor >= len(l.filtered) {
+		l.cursor = max(0, len(l.filtered)-1)
+	}
+}
+
+// SetSize sets the terminal dimensions.
+func (l *ListView) SetSize(w, h int) {
+	l.width = w
+	l.height = h
+}
+
+// SelectedIssue returns the currently selected issue, or nil.
+func (l *ListView) SelectedIssue() *models.Issue {
+	if len(l.filtered) == 0 || l.cursor >= len(l.filtered) {
+		return nil
+	}
+	return &l.filtered[l.cursor]
+}
+
+// IsFiltering returns whether the filter input is active.
+func (l *ListView) IsFiltering() bool {
+	return l.filtering
+}
+
+// Update handles key messages for the list view.
+func (l *ListView) Update(msg tea.Msg) tea.Cmd {
+	if l.filtering {
+		return l.updateFiltering(msg)
+	}
+
+	switch msg := msg.(type) {
+	case tea.KeyMsg:
+		switch msg.String() {
+		case "j", "down":
+			if l.cursor < len(l.filtered)-1 {
+				l.cursor++
+				l.ensureVisible()
+			}
+		case "k", "up":
+			if l.cursor > 0 {
+				l.cursor--
+				l.ensureVisible()
+			}
+		case "g", "home":
+			l.cursor = 0
+			l.offset = 0
+		case "G", "end":
+			l.cursor = max(0, len(l.filtered)-1)
+			l.ensureVisible()
+		case "ctrl+d":
+			pageSize := l.visibleRows() / 2
+			l.cursor = min(l.cursor+pageSize, max(0, len(l.filtered)-1))
+			l.ensureVisible()
+		case "ctrl+u":
+			pageSize := l.visibleRows() / 2
+			l.cursor = max(l.cursor-pageSize, 0)
+			l.ensureVisible()
+		case "s":
+			l.sortField = (l.sortField + 1) % 6
+			l.applyFilterAndSort()
+		case "S":
+			l.sortReverse = !l.sortReverse
+			l.applyFilterAndSort()
+		case "1":
+			l.toggleStatusFilter(FilterOpen)
+		case "2":
+			l.toggleStatusFilter(FilterInProgress)
+		case "3":
+			l.toggleStatusFilter(FilterBlocked)
+		case "4":
+			l.toggleStatusFilter(FilterClosed)
+		case "5":
+			l.toggleStatusFilter(FilterReady)
+		case "0":
+			l.statusFilter = FilterAll
+			l.applyFilterAndSort()
+		case "/":
+			l.filtering = true
+			l.filterInput.Focus()
+			return textinput.Blink
+		}
+	}
+	return nil
+}
+
+func (l *ListView) toggleStatusFilter(f StatusFilter) {
+	if l.statusFilter == f {
+		l.statusFilter = FilterAll
+	} else {
+		l.statusFilter = f
+	}
+	l.applyFilterAndSort()
+}
+
+func (l *ListView) updateFiltering(msg tea.Msg) tea.Cmd {
+	switch msg := msg.(type) {
+	case tea.KeyMsg:
+		switch msg.String() {
+		case "enter":
+			l.filterText = l.filterInput.Value()
+			l.filtering = false
+			l.filterInput.Blur()
+			l.applyFilterAndSort()
+			return nil
+		case "esc":
+			l.filtering = false
+			l.filterInput.Blur()
+			l.filterInput.SetValue(l.filterText)
+			return nil
+		}
+	}
+	var cmd tea.Cmd
+	l.filterInput, cmd = l.filterInput.Update(msg)
+	// Live filter as user types
+	l.filterText = l.filterInput.Value()
+	l.applyFilterAndSort()
+	return cmd
+}
+
+func (l *ListView) applyFilterAndSort() {
+	// Filter
+	var filtered []models.Issue
+	for _, issue := range l.allIssues {
+		if !l.matchesStatusFilter(issue) {
+			continue
+		}
+		if !l.matchesTextFilter(issue) {
+			continue
+		}
+		filtered = append(filtered, issue)
+	}
+
+	// Sort
+	sort.SliceStable(filtered, func(i, j int) bool {
+		cmp := l.compareIssues(filtered[i], filtered[j])
+		if l.sortReverse {
+			return cmp > 0
+		}
+		return cmp < 0
+	})
+
+	l.filtered = filtered
+}
+
+func (l *ListView) matchesStatusFilter(issue models.Issue) bool {
+	switch l.statusFilter {
+	case FilterAll:
+		return true
+	case FilterOpen:
+		return issue.Status == "open"
+	case FilterInProgress:
+		return issue.Status == "in_progress"
+	case FilterBlocked:
+		return issue.Status == "blocked"
+	case FilterClosed:
+		return issue.Status == "closed"
+	case FilterReady:
+		return l.readyIDs[issue.ID]
+	default:
+		return true
+	}
+}
+
+func (l *ListView) matchesTextFilter(issue models.Issue) bool {
+	if l.filterText == "" {
+		return true
+	}
+	needle := strings.ToLower(l.filterText)
+	return strings.Contains(strings.ToLower(issue.ID), needle) ||
+		strings.Contains(strings.ToLower(issue.Title), needle) ||
+		strings.Contains(strings.ToLower(issue.IssueType), needle) ||
+		strings.Contains(strings.ToLower(issue.Assignee), needle)
+}
+
+func (l *ListView) compareIssues(a, b models.Issue) int {
+	switch l.sortField {
+	case SortByPriority:
+		if a.Priority != b.Priority {
+			return a.Priority - b.Priority
+		}
+		// Secondary: newer first
+		if a.CreatedAt.After(b.CreatedAt) {
+			return -1
+		}
+		return 1
+	case SortByCreated:
+		if a.CreatedAt.After(b.CreatedAt) {
+			return -1
+		}
+		if a.CreatedAt.Before(b.CreatedAt) {
+			return 1
+		}
+		return 0
+	case SortByUpdated:
+		if a.UpdatedAt.After(b.UpdatedAt) {
+			return -1
+		}
+		if a.UpdatedAt.Before(b.UpdatedAt) {
+			return 1
+		}
+		return 0
+	case SortByStatus:
+		return statusOrder(a.Status) - statusOrder(b.Status)
+	case SortByType:
+		return strings.Compare(a.IssueType, b.IssueType)
+	case SortByID:
+		return strings.Compare(a.ID, b.ID)
+	default:
+		return 0
+	}
+}
+
+func statusOrder(s string) int {
+	switch s {
+	case "in_progress":
+		return 0
+	case "open":
+		return 1
+	case "blocked":
+		return 2
+	case "deferred":
+		return 3
+	case "pinned":
+		return 4
+	case "closed":
+		return 5
+	default:
+		return 6
+	}
+}
+
+func (l *ListView) visibleRows() int {
+	// header(3) + table header(1) + status bar(1) + filter bar if active(1)
+	overhead := 5
+	if l.filtering {
+		overhead++
+	}
+	return max(1, l.height-overhead)
+}
+
+func (l *ListView) ensureVisible() {
+	vis := l.visibleRows()
+	if l.cursor < l.offset {
+		l.offset = l.cursor
+	}
+	if l.cursor >= l.offset+vis {
+		l.offset = l.cursor - vis + 1
+	}
+}
+
+// View renders the list view.
+func (l *ListView) View() string {
+	var b strings.Builder
+
+	// Header bar
+	b.WriteString(l.renderHeader())
+	b.WriteString("\n")
+
+	// Table
+	b.WriteString(l.renderTable())
+
+	// Filter bar (if filtering)
+	if l.filtering {
+		b.WriteString("\n")
+		b.WriteString(ui.FilterPromptStyle.Render("/") + " " + l.filterInput.View())
+	}
+
+	// Status bar
+	b.WriteString("\n")
+	b.WriteString(l.renderStatusBar())
+
+	return b.String()
+}
+
+func (l *ListView) renderHeader() string {
+	logo := ui.LogoStyle.Render("bdy")
+
+	var parts []string
+	parts = append(parts, fmt.Sprintf("%d issues", len(l.filtered)))
+
+	if l.stats != nil {
+		s := l.stats
+		if s.OpenIssues > 0 {
+			parts = append(parts, ui.StatusStyle("open").Render(fmt.Sprintf("%d open", s.OpenIssues)))
+		}
+		if s.InProgressIssues > 0 {
+			parts = append(parts, ui.StatusStyle("in_progress").Render(fmt.Sprintf("%d in_progress", s.InProgressIssues)))
+		}
+		if s.BlockedIssues > 0 {
+			parts = append(parts, ui.StatusStyle("blocked").Render(fmt.Sprintf("%d blocked", s.BlockedIssues)))
+		}
+		if s.ClosedIssues > 0 {
+			parts = append(parts, ui.StatusStyle("closed").Render(fmt.Sprintf("%d closed", s.ClosedIssues)))
+		}
+		if s.ReadyIssues > 0 {
+			parts = append(parts, lipgloss.NewStyle().Foreground(ui.ColorGreen).Render(fmt.Sprintf("%d ready", s.ReadyIssues)))
+		}
+	}
+
+	info := strings.Join(parts, "  ")
+	sortInfo := ui.KeyStyle.Render("sort:") + " " + ui.KeyDescStyle.Render(l.sortField.String())
+	if l.sortReverse {
+		sortInfo += ui.KeyDescStyle.Render(" (rev)")
+	}
+	filterInfo := ""
+	if l.statusFilter != FilterAll {
+		filterInfo = "  " + ui.KeyStyle.Render("filter:") + " " + ui.KeyDescStyle.Render(l.statusFilter.String())
+	}
+	if l.filterText != "" {
+		filterInfo += "  " + ui.KeyStyle.Render("search:") + " " + ui.KeyDescStyle.Render(l.filterText)
+	}
+
+	left := logo + "  " + info
+	right := sortInfo + filterInfo
+	gap := max(0, l.width-lipgloss.Width(left)-lipgloss.Width(right)-2)
+	header := left + strings.Repeat(" ", gap) + right
+
+	return ui.HeaderStyle.Width(l.width).Render(header)
+}
+
+func (l *ListView) renderTable() string {
+	if len(l.filtered) == 0 {
+		msg := "No issues found."
+		if l.statusFilter != FilterAll || l.filterText != "" {
+			msg += " Try clearing filters (press 0 or Esc)."
+		}
+		emptyHeight := max(1, l.height-6)
+		pad := strings.Repeat("\n", emptyHeight/2)
+		return pad + lipgloss.NewStyle().
+			Width(l.width).
+			Align(lipgloss.Center).
+			Foreground(ui.ColorGray).
+			Render(msg)
+	}
+
+	// Column widths
+	colID := 12
+	colPri := 4
+	colStatus := 13
+	colType := 9
+	colAge := 6
+	colAssignee := 12
+	colDeps := 5
+	// Title gets the remainder
+	colTitle := max(10, l.width-colID-colPri-colStatus-colType-colAge-colAssignee-colDeps-10)
+
+	// Header row
+	hdr := fmt.Sprintf("  %-*s %-*s %-*s %-*s %-*s %-*s %-*s %s",
+		colID, "ID",
+		colPri, "PRI",
+		colStatus, "STATUS",
+		colType, "TYPE",
+		colTitle, "TITLE",
+		colAssignee, "ASSIGNEE",
+		colAge, "AGE",
+		"DEPS",
+	)
+	headerRow := ui.TableHeaderStyle.Width(l.width).Render(hdr)
+
+	// Data rows
+	vis := l.visibleRows()
+	end := min(l.offset+vis, len(l.filtered))
+	var rows []string
+	rows = append(rows, headerRow)
+
+	for i := l.offset; i < end; i++ {
+		issue := l.filtered[i]
+		selected := i == l.cursor
+
+		cursor := "  "
+		if selected {
+			cursor = "> "
+		}
+
+		id := truncate(issue.ID, colID)
+		pri := issue.PriorityString()
+		status := truncate(issue.Status, colStatus)
+		itype := truncate(issue.IssueType, colType)
+		title := truncate(issue.Title, colTitle)
+		age := models.RelativeAge(issue.CreatedAt)
+		assignee := truncate(issue.Assignee, colAssignee)
+		if assignee == "" {
+			assignee = "-"
+		}
+		deps := ""
+		if issue.DependencyCount > 0 || issue.DependentCount > 0 {
+			deps = fmt.Sprintf("%d/%d", issue.DependencyCount, issue.DependentCount)
+		}
+
+		row := fmt.Sprintf("%s%-*s %-*s %-*s %-*s %-*s %-*s %-*s %s",
+			cursor,
+			colID, id,
+			colPri, ui.PriorityStyle(issue.Priority).Render(pri),
+			colStatus, ui.StatusStyle(issue.Status).Render(status),
+			colType, ui.TypeStyle(issue.IssueType).Render(itype),
+			colTitle, title,
+			colAssignee, assignee,
+			colAge, age,
+			deps,
+		)
+
+		if selected {
+			row = ui.SelectedRowStyle.Width(l.width).Render(row)
+		}
+
+		rows = append(rows, row)
+	}
+
+	// Pad remaining space
+	rendered := len(rows) - 1 // subtract header
+	for rendered < vis {
+		rows = append(rows, strings.Repeat(" ", l.width))
+		rendered++
+	}
+
+	return strings.Join(rows, "\n")
+}
+
+func (l *ListView) renderStatusBar() string {
+	keys := []struct{ key, desc string }{
+		{"enter", "view"},
+		{"/", "filter"},
+		{"s", "sort"},
+		{"S", "reverse"},
+		{"1-5", "status"},
+		{"0", "all"},
+		{"r", "refresh"},
+		{"?", "help"},
+		{"q", "quit"},
+	}
+	var parts []string
+	for _, k := range keys {
+		parts = append(parts, ui.KeyStyle.Render(k.key)+" "+ui.KeyDescStyle.Render(k.desc))
+	}
+	bar := strings.Join(parts, "  ")
+	return ui.StatusBarStyle.Width(l.width).Render(bar)
+}
+
+func truncate(s string, maxLen int) string {
+	if len(s) <= maxLen {
+		return s
+	}
+	if maxLen <= 3 {
+		return s[:maxLen]
+	}
+	return s[:maxLen-3] + "..."
+}
