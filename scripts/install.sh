@@ -111,7 +111,7 @@ install() {
 
     # Create temp directory
     tmp_dir=$(mktemp -d)
-    trap 'rm -rf "$tmp_dir"' EXIT
+    trap 'rm -rf "${tmp_dir:-}"' EXIT
 
     # Download
     info "Downloading..."
