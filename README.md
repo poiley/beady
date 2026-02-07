@@ -4,6 +4,8 @@ A k9s-style terminal UI for browsing [beads](https://github.com/steveyegge/beads
 
 Full-screen, keyboard-driven, read-only viewer for your local beads database. Designed for single-repo, single-user workflows where you want to quickly see what's in the queue.
 
+![bdy demo](demo.gif)
+
 ## Install
 
 **Homebrew** (macOS):
