@@ -45,6 +45,19 @@ changelog:
       - "^test:"
       - "^ci:"
 
+brews:
+  - repository:
+      owner: poiley
+      name: homebrew-tap
+    name: bdy
+    homepage: "https://github.com/poiley/beady"
+    description: "A k9s-style terminal UI for browsing beads issues"
+    license: "MIT"
+    install: |
+      bin.install "bdy"
+    test: |
+      system "#{bin}/bdy", "--version"
+
 release:
   github:
     owner: poiley

@@ -1,6 +1,9 @@
 # Binary (the compiled output, not the cmd/bdy source directory)
 /bdy
 
+# GoReleaser
+/dist/
+
 # IDE
 .idea/
 .vscode/
