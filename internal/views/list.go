@@ -625,7 +625,7 @@ func (l *ListView) renderTable() string {
 	tbl.Resolve(l.width-cursorWidth, dataWidths)
 
 	// Render header row.
-	headers := make([]string, 8)
+	headers := make([]string, 9)
 	for i, col := range tbl.Columns {
 		headers[i] = col.Header
 	}
