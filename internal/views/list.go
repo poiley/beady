@@ -107,6 +107,9 @@ type ListView struct {
 	// Change tracking for pulse flare on updated rows.
 	prevUpdatedAt map[string]time.Time // issue ID -> UpdatedAt from last data load
 	flashIDs      map[string]bool      // issue IDs currently flashing
+
+	// Completion tracking for epics/parents.
+	closedChildrenCount map[string]int // parent ID -> count of closed children
 }
 
 // NewListView creates a new list view.
@@ -115,13 +118,14 @@ func NewListView() *ListView {
 	ti.Placeholder = "filter..."
 	ti.CharLimit = 100
 	return &ListView{
-		sortField:     SortByPriority,
-		statusFilter:  FilterAll,
-		hideClosed:    true,
-		filterInput:   ti,
-		readyIDs:      make(map[string]bool),
-		prevUpdatedAt: make(map[string]time.Time),
-		flashIDs:      make(map[string]bool),
+		sortField:           SortByPriority,
+		statusFilter:        FilterAll,
+		hideClosed:          true,
+		filterInput:         ti,
+		readyIDs:            make(map[string]bool),
+		prevUpdatedAt:       make(map[string]time.Time),
+		flashIDs:            make(map[string]bool),
+		closedChildrenCount: make(map[string]int),
 	}
 }
 
@@ -163,6 +167,30 @@ func (l *ListView) SetData(issues []models.Issue, readyIssues []models.Issue, st
 	for _, ri := range readyIssues {
 		l.readyIDs[ri.ID] = true
 	}
+
+	// Calculate closed children counts for epics/parents.
+	// Since bd list doesn't include parent field, infer parent-child relationships
+	// from ID patterns: children have IDs like "parent-id.N" or "parent-id.abc".
+	l.closedChildrenCount = make(map[string]int)
+	for _, issue := range issues {
+		// Check if this issue ID contains a dot (potential child).
+		if dotIdx := strings.LastIndex(issue.ID, "."); dotIdx > 0 {
+			// Extract parent ID (everything before the last dot).
+			parentID := issue.ID[:dotIdx]
+			// Only count if parent exists in the issue list.
+			parentExists := false
+			for _, p := range issues {
+				if p.ID == parentID {
+					parentExists = true
+					break
+				}
+			}
+			if parentExists && issue.Status == "closed" {
+				l.closedChildrenCount[parentID]++
+			}
+		}
+	}
+
 	l.applyFilterAndSort()
 	// Clamp cursor
 	if l.cursor >= len(l.filtered) {
@@ -512,10 +540,11 @@ const (
 	colIdxPri      = 1
 	colIdxStatus   = 2
 	colIdxType     = 3
-	colIdxTitle    = 4
-	colIdxAssignee = 5
-	colIdxAge      = 6
-	colIdxDeps     = 7
+	colIdxDone     = 4
+	colIdxTitle    = 5
+	colIdxAssignee = 6
+	colIdxAge      = 7
+	colIdxDeps     = 8
 )
 
 func (l *ListView) renderTable() string {
@@ -539,6 +568,7 @@ func (l *ListView) renderTable() string {
 		&ui.Column{Header: "PRI", Size: ui.SizeFixed, Align: ui.AlignLeft, Fixed: 3},
 		&ui.Column{Header: "STATUS", Size: ui.SizeFit, Align: ui.AlignLeft, Min: 6, Max: 12},
 		&ui.Column{Header: "TYPE", Size: ui.SizeFit, Align: ui.AlignLeft, Min: 4, Max: 10},
+		&ui.Column{Header: "DONE", Size: ui.SizeFit, Align: ui.AlignRight, Min: 4, Max: 7},
 		&ui.Column{Header: "TITLE", Size: ui.SizeFlex, Align: ui.AlignLeft, Min: 10},
 		&ui.Column{Header: "ASSIGNEE", Size: ui.SizeFit, Align: ui.AlignRight, Min: 1, Max: 14},
 		&ui.Column{Header: "AGE", Size: ui.SizeFit, Align: ui.AlignRight, Min: 3, Max: 5},
@@ -548,7 +578,7 @@ func (l *ListView) renderTable() string {
 
 	// Scan data to compute max display widths per column (for SizeFit columns).
 	// Uses ui.StringWidth to correctly handle wide/multi-byte characters.
-	dataWidths := make([]int, 8)
+	dataWidths := make([]int, 9)
 	for _, issue := range l.filtered {
 		if n := ui.StringWidth(issue.ID); n > dataWidths[colIdxID] {
 			dataWidths[colIdxID] = n
@@ -559,6 +589,15 @@ func (l *ListView) renderTable() string {
 		}
 		if n := ui.StringWidth(issue.IssueType); n > dataWidths[colIdxType] {
 			dataWidths[colIdxType] = n
+		}
+		// DONE column: show closed/total for issues with dependents.
+		done := ""
+		if issue.DependentCount > 0 {
+			closedCount := l.closedChildrenCount[issue.ID]
+			done = fmt.Sprintf("%d/%d", closedCount, issue.DependentCount)
+		}
+		if n := ui.StringWidth(done); n > dataWidths[colIdxDone] {
+			dataWidths[colIdxDone] = n
 		}
 		// TITLE is flex, no scan needed.
 		if n := ui.StringWidth(issue.Assignee); n > dataWidths[colIdxAssignee] {
@@ -612,6 +651,11 @@ func (l *ListView) renderTable() string {
 		if assignee == "" {
 			assignee = "-"
 		}
+		done := ""
+		if issue.DependentCount > 0 {
+			closedCount := l.closedChildrenCount[issue.ID]
+			done = fmt.Sprintf("%d/%d", closedCount, issue.DependentCount)
+		}
 		deps := ""
 		if issue.DependencyCount > 0 || issue.DependentCount > 0 {
 			deps = fmt.Sprintf("%d/%d", issue.DependencyCount, issue.DependentCount)
@@ -622,6 +666,7 @@ func (l *ListView) renderTable() string {
 			issue.PriorityString(),
 			issue.Status,
 			issue.IssueType,
+			done,
 			issue.Title,
 			assignee,
 			models.RelativeAge(issue.CreatedAt),
