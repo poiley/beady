@@ -75,13 +75,12 @@ var (
 	// Detail view section headers
 	SectionHeaderStyle = lipgloss.NewStyle().
 				Bold(true).
-				Foreground(ColorBlue).
-				MarginTop(1)
+				Foreground(ColorBlue)
 
 	// Section cursor highlight (distinct from nav cursor's dark-blue bg).
 	// Uses background-only to avoid ANSI conflicts with already-styled text.
 	SectionCursorStyle = lipgloss.NewStyle().
-				Background(lipgloss.Color("#2E2E0E"))
+				Background(lipgloss.Color("#3E3516"))
 
 	// Detail view field labels
 	FieldLabelStyle = lipgloss.NewStyle().
