@@ -361,10 +361,18 @@ func (l *ListView) matchesTextFilter(issue models.Issue) bool {
 		return true
 	}
 	needle := strings.ToLower(l.filterText)
-	return strings.Contains(strings.ToLower(issue.ID), needle) ||
+	if strings.Contains(strings.ToLower(issue.ID), needle) ||
 		strings.Contains(strings.ToLower(issue.Title), needle) ||
 		strings.Contains(strings.ToLower(issue.IssueType), needle) ||
-		strings.Contains(strings.ToLower(issue.Assignee), needle)
+		strings.Contains(strings.ToLower(issue.Assignee), needle) {
+		return true
+	}
+	for _, label := range issue.Labels {
+		if strings.Contains(strings.ToLower(label), needle) {
+			return true
+		}
+	}
+	return false
 }
 
 func (l *ListView) compareIssues(a, b models.Issue) int {
