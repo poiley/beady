@@ -463,8 +463,11 @@ func statusOrder(s string) int {
 }
 
 func (l *ListView) visibleRows() int {
-	// header(1) + newline(1) + table header with border(2) + newline(1) + status bar(1)
-	overhead := 6
+	// The View output has these lines:
+	//   header(1) + table header text(1) + table border(1) + vis data rows + status bar(1)
+	// The \n separators between these sections don't add extra lines — they
+	// just separate adjacent content. Total = vis + 4, so overhead = 4.
+	overhead := 4
 	if l.filtering {
 		overhead++
 	}
