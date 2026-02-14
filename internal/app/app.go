@@ -8,9 +8,11 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 
 	"github.com/poiley/beady/internal/bd"
 	"github.com/poiley/beady/internal/models"
+	"github.com/poiley/beady/internal/ui"
 	"github.com/poiley/beady/internal/views"
 )
 
@@ -295,7 +297,7 @@ func (a *App) View() string {
 	}
 
 	if a.err != nil {
-		errMsg := ui_errorView(a.err, a.width, a.height)
+		errMsg := errorView(a.err, a.width, a.height)
 		return errMsg
 	}
 
@@ -382,11 +384,24 @@ func copyToClipboard(text string) {
 }
 
 func loadingView(width, height int) string {
-	msg := "Loading beads..."
-	return fmt.Sprintf("%*s", width/2+len(msg)/2, msg)
+	msg := ui.LogoStyle.Render("bdy") + "  " +
+		lipgloss.NewStyle().Foreground(ui.ColorGray).Render("Loading beads...")
+	return lipgloss.Place(width, height, lipgloss.Center, lipgloss.Center, msg)
 }
 
-func ui_errorView(err error, width, height int) string {
-	msg := fmt.Sprintf("Error: %s\n\nPress 'r' to retry or 'q' to quit.", err)
-	return fmt.Sprintf("\n\n  %s", msg)
+func errorView(err error, width, height int) string {
+	title := ui.ErrorStyle.Render("Error")
+	detail := lipgloss.NewStyle().Foreground(ui.ColorWhite).Render(err.Error())
+	hint := lipgloss.NewStyle().Foreground(ui.ColorGray).Render("Press 'r' to retry or 'q' to quit.")
+
+	content := fmt.Sprintf("%s\n\n%s\n\n%s", title, detail, hint)
+
+	box := lipgloss.NewStyle().
+		Width(min(60, width-4)).
+		Padding(1, 2).
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(ui.ColorRed).
+		Render(content)
+
+	return lipgloss.Place(width, height, lipgloss.Center, lipgloss.Center, box)
 }
