@@ -170,6 +170,14 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return a, nil
 
+	case views.NavigateToIssueMsg:
+		// Drill-down: push current detail onto stack and load the new one.
+		if a.detail != nil {
+			a.detailStack = append(a.detailStack, a.detail)
+		}
+		a.loading = true
+		return a, a.loadDetail(msg.ID)
+
 	case tea.KeyMsg:
 		// Global keys
 		switch msg.String() {

@@ -11,6 +11,17 @@ import (
 	"github.com/poiley/beady/internal/ui"
 )
 
+// NavigateToIssueMsg requests the app to load a detail view for the given ID.
+type NavigateToIssueMsg struct {
+	ID string
+}
+
+// navItem maps a rendered line to a navigable issue.
+type navItem struct {
+	lineIndex int    // index into d.lines
+	issueID   string // issue to navigate to on enter
+}
+
 // DetailView shows full details for a single issue.
 type DetailView struct {
 	issue     *models.Issue
@@ -19,11 +30,15 @@ type DetailView struct {
 	scroll    int
 	lines     []string // pre-rendered content lines
 	statusMsg string   // temporary status bar message
+
+	// Navigation within deps/dependents.
+	navItems  []navItem // navigable lines (dependencies + dependents)
+	navCursor int       // index into navItems, -1 = none selected
 }
 
 // NewDetailView creates a detail view for an issue.
 func NewDetailView(issue *models.Issue) *DetailView {
-	d := &DetailView{issue: issue}
+	d := &DetailView{issue: issue, navCursor: -1}
 	d.buildContent()
 	return d
 }
@@ -60,6 +75,15 @@ func (d *DetailView) UpdateIssue(issue *models.Issue) {
 	}
 }
 
+// SelectedNavID returns the issue ID of the currently selected nav item,
+// or empty string if nothing is selected.
+func (d *DetailView) SelectedNavID() string {
+	if d.navCursor < 0 || d.navCursor >= len(d.navItems) {
+		return ""
+	}
+	return d.navItems[d.navCursor].issueID
+}
+
 // Update handles key messages.
 func (d *DetailView) Update(msg tea.Msg) tea.Cmd {
 	switch msg := msg.(type) {
@@ -83,9 +107,45 @@ func (d *DetailView) Update(msg tea.Msg) tea.Cmd {
 		case "ctrl+u":
 			page := d.visibleLines() / 2
 			d.scroll = max(d.scroll-page, 0)
+		case "tab":
+			if len(d.navItems) > 0 {
+				d.navCursor++
+				if d.navCursor >= len(d.navItems) {
+					d.navCursor = 0
+				}
+				d.scrollToNav()
+			}
+		case "shift+tab":
+			if len(d.navItems) > 0 {
+				d.navCursor--
+				if d.navCursor < 0 {
+					d.navCursor = len(d.navItems) - 1
+				}
+				d.scrollToNav()
+			}
+		case "enter":
+			if id := d.SelectedNavID(); id != "" {
+				return func() tea.Msg {
+					return NavigateToIssueMsg{ID: id}
+				}
+			}
 		}
 	}
 	return nil
+}
+
+// scrollToNav scrolls the view to make the current nav item visible.
+func (d *DetailView) scrollToNav() {
+	if d.navCursor < 0 || d.navCursor >= len(d.navItems) {
+		return
+	}
+	line := d.navItems[d.navCursor].lineIndex
+	vis := d.visibleLines()
+	if line < d.scroll {
+		d.scroll = line
+	} else if line >= d.scroll+vis {
+		d.scroll = line - vis + 1
+	}
 }
 
 func (d *DetailView) visibleLines() int {
@@ -143,12 +203,14 @@ func (d *DetailView) renderHeader() string {
 func (d *DetailView) buildContent() {
 	if d.issue == nil {
 		d.lines = []string{"(no issue data)"}
+		d.navItems = nil
 		return
 	}
 	issue := d.issue
 	contentWidth := max(20, d.width-4)
 
 	var lines []string
+	var navItems []navItem
 	add := func(s string) {
 		lines = append(lines, s)
 	}
@@ -257,6 +319,7 @@ func (d *DetailView) buildContent() {
 				ui.StatusStyle(dep.Status).Render(dep.Status),
 				ui.PriorityStyle(dep.Priority).Render(dep.PriorityString()),
 			)
+			navItems = append(navItems, navItem{lineIndex: len(lines), issueID: dep.ID})
 			add(depLine)
 		}
 	}
@@ -279,6 +342,7 @@ func (d *DetailView) buildContent() {
 				ui.StatusStyle(dep.Status).Render(dep.Status),
 				ui.PriorityStyle(dep.Priority).Render(dep.PriorityString()),
 			)
+			navItems = append(navItems, navItem{lineIndex: len(lines), issueID: dep.ID})
 			add(depLine)
 		}
 	}
@@ -300,6 +364,11 @@ func (d *DetailView) buildContent() {
 	}
 
 	d.lines = lines
+	d.navItems = navItems
+	// Clamp nav cursor
+	if d.navCursor >= len(d.navItems) {
+		d.navCursor = max(-1, len(d.navItems)-1)
+	}
 }
 
 func (d *DetailView) renderContent() string {
@@ -310,7 +379,20 @@ func (d *DetailView) renderContent() string {
 		start = max(0, len(d.lines)-1)
 	}
 
-	visible := d.lines[start:end]
+	// Build set of highlighted line indices.
+	highlightLine := -1
+	if d.navCursor >= 0 && d.navCursor < len(d.navItems) {
+		highlightLine = d.navItems[d.navCursor].lineIndex
+	}
+
+	visible := make([]string, 0, end-start)
+	for i := start; i < end; i++ {
+		line := d.lines[i]
+		if i == highlightLine {
+			line = ui.SelectedRowStyle.Width(d.width - 4).Render(line)
+		}
+		visible = append(visible, line)
+	}
 	content := strings.Join(visible, "\n")
 
 	// Pad to fill space
@@ -336,8 +418,9 @@ func (d *DetailView) renderStatusBar() string {
 	keys := []struct{ key, desc string }{
 		{"esc", "back"},
 		{"j/k", "scroll"},
+		{"tab", "next dep"},
+		{"enter", "drill in"},
 		{"g/G", "top/bottom"},
-		{"ctrl+d/u", "page"},
 		{"r", "refresh"},
 		{"y", "copy ID"},
 		{"?", "help"},
