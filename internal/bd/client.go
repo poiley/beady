@@ -37,22 +37,6 @@ func (c *Client) run(args ...string) ([]byte, error) {
 	return out, nil
 }
 
-// List returns all issues (non-closed by default).
-func (c *Client) List() ([]models.Issue, error) {
-	out, err := c.run("list", "--limit", "0")
-	if err != nil {
-		return nil, err
-	}
-	if len(out) == 0 || strings.TrimSpace(string(out)) == "" {
-		return nil, nil
-	}
-	var issues []models.Issue
-	if err := json.Unmarshal(out, &issues); err != nil {
-		return nil, fmt.Errorf("parsing bd list output: %w", err)
-	}
-	return issues, nil
-}
-
 // ListAll returns all issues including closed.
 func (c *Client) ListAll() ([]models.Issue, error) {
 	out, err := c.run("list", "--all", "--limit", "0")

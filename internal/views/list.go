@@ -133,22 +133,13 @@ func NewListView() *ListView {
 // Returns true if any issues changed (and row flashes were triggered).
 func (l *ListView) SetData(issues []models.Issue, readyIssues []models.Issue, stats *models.StatsSummary) bool {
 	// Detect changed rows by comparing UpdatedAt timestamps.
+	// New issues (not in prevUpdatedAt) and issues with changed timestamps
+	// are both caught by the !existed || !Equal check.
 	hasFlashes := false
 	if len(l.prevUpdatedAt) > 0 {
-		// Build current index
-		currentIDs := make(map[string]bool, len(issues))
 		for _, issue := range issues {
-			currentIDs[issue.ID] = true
 			prev, existed := l.prevUpdatedAt[issue.ID]
 			if !existed || !issue.UpdatedAt.Equal(prev) {
-				l.flashIDs[issue.ID] = true
-				hasFlashes = true
-			}
-		}
-		// Flash newly removed issues? No — they won't render anyway.
-		// Flash newly added issues.
-		for _, issue := range issues {
-			if _, existed := l.prevUpdatedAt[issue.ID]; !existed {
 				l.flashIDs[issue.ID] = true
 				hasFlashes = true
 			}
