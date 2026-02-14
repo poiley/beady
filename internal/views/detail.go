@@ -46,6 +46,10 @@ type DetailView struct {
 	lines     []string // pre-rendered content lines
 	statusMsg string   // temporary status bar message
 
+	// Per-line section tracking: lineSection[i] is the sectionKind that
+	// line i belongs to, or -1 for non-section lines (metadata, title).
+	lineSection []sectionKind
+
 	// Navigation within parent/deps/dependents.
 	navItems  []navItem // navigable lines (parent + dependencies + dependents)
 	navCursor int       // index into navItems, -1 = none selected
@@ -163,63 +167,27 @@ func (d *DetailView) Update(msg tea.Msg) tea.Cmd {
 	return nil
 }
 
-// toggleSectionAtScroll finds the section header at or above the current
-// scroll position and toggles its collapsed state.
+// toggleSectionAtScroll finds the section at the top of the visible area
+// and toggles its collapsed state.
 func (d *DetailView) toggleSectionAtScroll() {
-	if d.issue == nil {
+	if d.issue == nil || len(d.lineSection) == 0 {
 		return
 	}
-	// Check which section the nav cursor is in (if any), otherwise
-	// use the scroll position.
-	targetLine := d.scroll
-	if d.navCursor >= 0 && d.navCursor < len(d.navItems) {
-		targetLine = d.navItems[d.navCursor].lineIndex
-	}
 
-	// Walk sections to find which one contains targetLine.
-	type sectionRange struct {
-		kind  sectionKind
-		start int
-	}
-	var sections []sectionRange
-	for i, line := range d.lines {
-		for sk := sectionKind(0); sk < sectionCount; sk++ {
-			label := sectionLabel(sk)
-			if label != "" && strings.Contains(line, label) {
-				sections = append(sections, sectionRange{kind: sk, start: i})
-				break
-			}
-		}
-	}
-
-	// Find the last section whose start <= targetLine.
-	for i := len(sections) - 1; i >= 0; i-- {
-		if sections[i].start <= targetLine {
-			d.collapsed[sections[i].kind] = !d.collapsed[sections[i].kind]
+	// Find the section at the current scroll position by scanning from
+	// the scroll line upward until we find a line tagged with a section.
+	for i := d.scroll; i >= 0; i-- {
+		if i < len(d.lineSection) && d.lineSection[i] >= 0 {
+			sk := d.lineSection[i]
+			d.collapsed[sk] = !d.collapsed[sk]
 			d.buildContent()
+			// Clamp scroll after rebuild.
+			maxScroll := max(0, len(d.lines)-d.visibleLines())
+			if d.scroll > maxScroll {
+				d.scroll = maxScroll
+			}
 			return
 		}
-	}
-}
-
-func sectionLabel(sk sectionKind) string {
-	switch sk {
-	case sectionDescription:
-		return "DESCRIPTION"
-	case sectionDesign:
-		return "DESIGN"
-	case sectionAcceptance:
-		return "ACCEPTANCE CRITERIA"
-	case sectionNotes:
-		return "NOTES"
-	case sectionDeps:
-		return "DEPENDENCIES"
-	case sectionDependents:
-		return "DEPENDENTS"
-	case sectionComments:
-		return "COMMENTS"
-	default:
-		return ""
 	}
 }
 
@@ -321,6 +289,7 @@ func (d *DetailView) renderHeader(vis int) string {
 func (d *DetailView) buildContent() {
 	if d.issue == nil {
 		d.lines = []string{"(no issue data)"}
+		d.lineSection = []sectionKind{-1}
 		d.navItems = nil
 		return
 	}
@@ -328,12 +297,17 @@ func (d *DetailView) buildContent() {
 	contentWidth := max(20, d.width-4)
 
 	var lines []string
+	var lineSec []sectionKind
 	var navItems []navItem
+	curSection := sectionKind(-1) // -1 = no section (metadata area)
+
 	add := func(s string) {
 		lines = append(lines, s)
+		lineSec = append(lineSec, curSection)
 	}
 	addBlank := func() {
 		lines = append(lines, "")
+		lineSec = append(lineSec, curSection)
 	}
 
 	// Title
@@ -393,37 +367,59 @@ func (d *DetailView) buildContent() {
 
 	// --- Collapsible sections ---
 
+	// Helper to add a section header + divider + optional body.
+	addSectionHeader := func(sk sectionKind, title string) {
+		curSection = sk
+		addBlank()
+		indicator := d.collapseIndicator(sk)
+		add(ui.SectionHeaderStyle.Render(fmt.Sprintf("%s %s", indicator, title)))
+		add(ui.TableHeaderStyle.Width(contentWidth).Render(""))
+	}
+
 	// Description
 	if issue.Description != "" {
-		addBlank()
-		d.addSection(&lines, sectionDescription, "DESCRIPTION", issue.Description, contentWidth)
+		addSectionHeader(sectionDescription, "DESCRIPTION")
+		if !d.collapsed[sectionDescription] {
+			for _, line := range wrapText(issue.Description, contentWidth) {
+				add(line)
+			}
+		}
 	}
 
 	// Design
 	if issue.Design != "" {
-		addBlank()
-		d.addSection(&lines, sectionDesign, "DESIGN", issue.Design, contentWidth)
+		addSectionHeader(sectionDesign, "DESIGN")
+		if !d.collapsed[sectionDesign] {
+			for _, line := range wrapText(issue.Design, contentWidth) {
+				add(line)
+			}
+		}
 	}
 
 	// Acceptance Criteria
 	if issue.AcceptanceCriteria != "" {
-		addBlank()
-		d.addSection(&lines, sectionAcceptance, "ACCEPTANCE CRITERIA", issue.AcceptanceCriteria, contentWidth)
+		addSectionHeader(sectionAcceptance, "ACCEPTANCE CRITERIA")
+		if !d.collapsed[sectionAcceptance] {
+			for _, line := range wrapText(issue.AcceptanceCriteria, contentWidth) {
+				add(line)
+			}
+		}
 	}
 
 	// Notes
 	if issue.Notes != "" {
-		addBlank()
-		d.addSection(&lines, sectionNotes, "NOTES", issue.Notes, contentWidth)
+		addSectionHeader(sectionNotes, "NOTES")
+		if !d.collapsed[sectionNotes] {
+			for _, line := range wrapText(issue.Notes, contentWidth) {
+				add(line)
+			}
+		}
 	}
 
 	// Dependencies (excluding parent-child, since parent is shown above)
 	nonParentDeps := d.nonParentDeps()
 	if len(nonParentDeps) > 0 {
-		addBlank()
-		indicator := d.collapseIndicator(sectionDeps)
-		add(ui.SectionHeaderStyle.Render(fmt.Sprintf("%s DEPENDENCIES (%d)", indicator, len(nonParentDeps))))
-		add(ui.TableHeaderStyle.Width(contentWidth).Render(""))
+		addSectionHeader(sectionDeps, fmt.Sprintf("DEPENDENCIES (%d)", len(nonParentDeps)))
 		if !d.collapsed[sectionDeps] {
 			for i, dep := range nonParentDeps {
 				prefix := "  ├─ "
@@ -445,10 +441,7 @@ func (d *DetailView) buildContent() {
 
 	// Dependents
 	if len(issue.Dependents) > 0 {
-		addBlank()
-		indicator := d.collapseIndicator(sectionDependents)
-		add(ui.SectionHeaderStyle.Render(fmt.Sprintf("%s DEPENDENTS (%d)", indicator, len(issue.Dependents))))
-		add(ui.TableHeaderStyle.Width(contentWidth).Render(""))
+		addSectionHeader(sectionDependents, fmt.Sprintf("DEPENDENTS (%d)", len(issue.Dependents)))
 		if !d.collapsed[sectionDependents] {
 			for i, dep := range issue.Dependents {
 				prefix := "  ├─ "
@@ -470,10 +463,7 @@ func (d *DetailView) buildContent() {
 
 	// Comments
 	if len(issue.Comments) > 0 {
-		addBlank()
-		indicator := d.collapseIndicator(sectionComments)
-		add(ui.SectionHeaderStyle.Render(fmt.Sprintf("%s COMMENTS (%d)", indicator, len(issue.Comments))))
-		add(ui.TableHeaderStyle.Width(contentWidth).Render(""))
+		addSectionHeader(sectionComments, fmt.Sprintf("COMMENTS (%d)", len(issue.Comments)))
 		if !d.collapsed[sectionComments] {
 			for _, c := range issue.Comments {
 				author := lipgloss.NewStyle().Bold(true).Foreground(ui.ColorCyan).Render(c.Author)
@@ -488,22 +478,11 @@ func (d *DetailView) buildContent() {
 	}
 
 	d.lines = lines
+	d.lineSection = lineSec
 	d.navItems = navItems
 	// Clamp nav cursor
 	if d.navCursor >= len(d.navItems) {
 		d.navCursor = max(-1, len(d.navItems)-1)
-	}
-}
-
-// addSection renders a collapsible text section (description, notes, etc.).
-func (d *DetailView) addSection(lines *[]string, kind sectionKind, title, text string, contentWidth int) {
-	indicator := d.collapseIndicator(kind)
-	*lines = append(*lines, ui.SectionHeaderStyle.Render(fmt.Sprintf("%s %s", indicator, title)))
-	*lines = append(*lines, ui.TableHeaderStyle.Width(contentWidth).Render(""))
-	if !d.collapsed[kind] {
-		for _, line := range wrapText(text, contentWidth) {
-			*lines = append(*lines, line)
-		}
 	}
 }
 
