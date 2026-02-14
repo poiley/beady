@@ -78,6 +78,12 @@ var (
 				Foreground(ColorBlue).
 				MarginTop(1)
 
+	// Section cursor highlight (distinct from nav cursor's blue bg)
+	SectionCursorStyle = lipgloss.NewStyle().
+				Bold(true).
+				Foreground(ColorYellow).
+				Underline(true)
+
 	// Detail view field labels
 	FieldLabelStyle = lipgloss.NewStyle().
 			Bold(true).

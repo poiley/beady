@@ -31,7 +31,7 @@ const (
 	sectionCount // sentinel — total number of section kinds
 )
 
-// navItem maps a rendered line to a navigable issue.
+// navItem maps a rendered line to a navigable issue link (for drill-down).
 type navItem struct {
 	lineIndex int    // index into d.lines
 	issueID   string // issue to navigate to on enter
@@ -46,13 +46,16 @@ type DetailView struct {
 	lines     []string // pre-rendered content lines
 	statusMsg string   // temporary status bar message
 
-	// Per-line section tracking: lineSection[i] is the sectionKind that
-	// line i belongs to, or -1 for non-section lines (metadata, title).
-	lineSection []sectionKind
-
-	// Navigation within parent/deps/dependents.
-	navItems  []navItem // navigable lines (parent + dependencies + dependents)
+	// Navigation within parent/deps/dependents (issue links only).
+	navItems  []navItem // navigable lines
 	navCursor int       // index into navItems, -1 = none selected
+
+	// Section cursor for collapse/expand (separate from nav cursor).
+	// sections lists the sectionKinds present in the current content.
+	// sectionLines[i] is the line index of sections[i]'s header.
+	sections      []sectionKind
+	sectionLines  []int
+	sectionCursor int // index into sections, 0 = first section
 
 	// Breadcrumb trail (set by app when drilling into deps).
 	breadcrumbs []string // issue IDs from root to current (exclusive)
@@ -160,58 +163,61 @@ func (d *DetailView) Update(msg tea.Msg) tea.Cmd {
 				}
 			}
 		case "x":
-			// Toggle collapse on the section header nearest above the cursor.
-			d.toggleSectionAtScroll()
+			d.toggleSection()
+		case "]":
+			d.moveSectionCursor(1)
+		case "[":
+			d.moveSectionCursor(-1)
 		}
 	}
 	return nil
 }
 
-// toggleSectionAtScroll toggles the section that's currently visible.
-// It scans the viewport for the first section-tagged line, then toggles it
-// and anchors the scroll so the section header stays in view.
-func (d *DetailView) toggleSectionAtScroll() {
-	if d.issue == nil || len(d.lineSection) == 0 {
+// toggleSection toggles collapse on the section under the section cursor.
+func (d *DetailView) toggleSection() {
+	if len(d.sections) == 0 {
 		return
 	}
-
-	// Scan the visible viewport for the first section-tagged line.
-	vis := d.visibleLines()
-	end := min(d.scroll+vis, len(d.lineSection))
-	sk := sectionKind(-1)
-	for i := d.scroll; i < end; i++ {
-		if d.lineSection[i] >= 0 {
-			sk = d.lineSection[i]
-			break
-		}
-	}
-	// Fallback: scan upward from scroll if nothing in viewport.
-	if sk < 0 {
-		for i := d.scroll - 1; i >= 0; i-- {
-			if d.lineSection[i] >= 0 {
-				sk = d.lineSection[i]
-				break
-			}
-		}
-	}
-	if sk < 0 {
-		return
+	if d.sectionCursor < 0 || d.sectionCursor >= len(d.sections) {
+		d.sectionCursor = 0
 	}
 
+	sk := d.sections[d.sectionCursor]
 	d.collapsed[sk] = !d.collapsed[sk]
-
-	// Remember the section we toggled so we can re-anchor scroll to it.
-	savedSection := sk
 	d.buildContent()
 
-	// Find where that section header ended up after rebuild and scroll to it.
-	for i, s := range d.lineSection {
-		if s == savedSection {
-			d.scroll = i
-			break
-		}
+	// Scroll so the toggled section header is visible.
+	d.scrollToSection()
+}
+
+// moveSectionCursor moves the section cursor by delta (+1 or -1) and scrolls
+// to make the new section header visible.
+func (d *DetailView) moveSectionCursor(delta int) {
+	if len(d.sections) == 0 {
+		return
 	}
-	// Clamp scroll.
+	d.sectionCursor += delta
+	if d.sectionCursor >= len(d.sections) {
+		d.sectionCursor = 0
+	}
+	if d.sectionCursor < 0 {
+		d.sectionCursor = len(d.sections) - 1
+	}
+	d.scrollToSection()
+}
+
+// scrollToSection scrolls the viewport so the current section header is visible.
+func (d *DetailView) scrollToSection() {
+	if d.sectionCursor < 0 || d.sectionCursor >= len(d.sectionLines) {
+		return
+	}
+	line := d.sectionLines[d.sectionCursor]
+	vis := d.visibleLines()
+	if line < d.scroll {
+		d.scroll = line
+	} else if line >= d.scroll+vis {
+		d.scroll = line - vis + 1
+	}
 	maxScroll := max(0, len(d.lines)-d.visibleLines())
 	if d.scroll > maxScroll {
 		d.scroll = maxScroll
@@ -316,25 +322,24 @@ func (d *DetailView) renderHeader(vis int) string {
 func (d *DetailView) buildContent() {
 	if d.issue == nil {
 		d.lines = []string{"(no issue data)"}
-		d.lineSection = []sectionKind{-1}
 		d.navItems = nil
+		d.sections = nil
+		d.sectionLines = nil
 		return
 	}
 	issue := d.issue
 	contentWidth := max(20, d.width-4)
 
 	var lines []string
-	var lineSec []sectionKind
 	var navItems []navItem
-	curSection := sectionKind(-1) // -1 = no section (metadata area)
+	var sections []sectionKind
+	var sectionLines []int
 
 	add := func(s string) {
 		lines = append(lines, s)
-		lineSec = append(lineSec, curSection)
 	}
 	addBlank := func() {
 		lines = append(lines, "")
-		lineSec = append(lineSec, curSection)
 	}
 
 	// Title
@@ -394,11 +399,13 @@ func (d *DetailView) buildContent() {
 
 	// --- Collapsible sections ---
 
-	// Helper to add a section header + divider + optional body.
+	// Helper to add a section header + divider. Registers the section
+	// in the sections list so the section cursor can navigate to it.
 	addSectionHeader := func(sk sectionKind, title string) {
-		curSection = sk
 		addBlank()
 		indicator := d.collapseIndicator(sk)
+		sections = append(sections, sk)
+		sectionLines = append(sectionLines, len(lines))
 		add(ui.SectionHeaderStyle.Render(fmt.Sprintf("%s %s", indicator, title)))
 		add(ui.TableHeaderStyle.Width(contentWidth).Render(""))
 	}
@@ -505,11 +512,20 @@ func (d *DetailView) buildContent() {
 	}
 
 	d.lines = lines
-	d.lineSection = lineSec
+	d.sections = sections
+	d.sectionLines = sectionLines
 	d.navItems = navItems
 	// Clamp nav cursor
 	if d.navCursor >= len(d.navItems) {
 		d.navCursor = max(-1, len(d.navItems)-1)
+	}
+	// Clamp section cursor
+	if len(d.sections) > 0 {
+		if d.sectionCursor >= len(d.sections) {
+			d.sectionCursor = len(d.sections) - 1
+		}
+	} else {
+		d.sectionCursor = 0
 	}
 }
 
@@ -546,9 +562,13 @@ func (d *DetailView) renderContent() string {
 	}
 
 	// Build set of highlighted line indices.
-	highlightLine := -1
+	navHighlight := -1
 	if d.navCursor >= 0 && d.navCursor < len(d.navItems) {
-		highlightLine = d.navItems[d.navCursor].lineIndex
+		navHighlight = d.navItems[d.navCursor].lineIndex
+	}
+	sectionHighlight := -1
+	if d.sectionCursor >= 0 && d.sectionCursor < len(d.sectionLines) {
+		sectionHighlight = d.sectionLines[d.sectionCursor]
 	}
 
 	// Horizontal padding applied per-line to avoid lipgloss re-wrapping
@@ -557,8 +577,10 @@ func (d *DetailView) renderContent() string {
 	visible := make([]string, 0, vis)
 	for i := start; i < end; i++ {
 		line := d.lines[i]
-		if i == highlightLine {
+		if i == navHighlight {
 			line = ui.SelectedRowStyle.Width(d.width - 4).Render(line)
+		} else if i == sectionHighlight {
+			line = ui.SectionCursorStyle.Width(d.width - 4).Render(line)
 		}
 		visible = append(visible, pad+line)
 	}
@@ -579,9 +601,10 @@ func (d *DetailView) renderStatusBar() string {
 	keys := []struct{ key, desc string }{
 		{"esc", "back"},
 		{"j/k", "scroll"},
+		{"[/]", "section"},
+		{"x", "collapse"},
 		{"tab", "next dep"},
 		{"enter", "drill in"},
-		{"x", "collapse"},
 		{"g/G", "top/bottom"},
 		{"r", "refresh"},
 		{"y", "copy ID"},

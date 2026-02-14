@@ -70,6 +70,7 @@ func (h *HelpView) View() string {
 		{
 			header: "Detail View",
 			keys: []struct{ key, desc string }{
+				{"[ / ]", "Move section cursor up / down"},
 				{"x", "Collapse / expand section under cursor"},
 			},
 		},
