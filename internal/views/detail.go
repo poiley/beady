@@ -167,27 +167,54 @@ func (d *DetailView) Update(msg tea.Msg) tea.Cmd {
 	return nil
 }
 
-// toggleSectionAtScroll finds the section at the top of the visible area
-// and toggles its collapsed state.
+// toggleSectionAtScroll toggles the section that's currently visible.
+// It scans the viewport for the first section-tagged line, then toggles it
+// and anchors the scroll so the section header stays in view.
 func (d *DetailView) toggleSectionAtScroll() {
 	if d.issue == nil || len(d.lineSection) == 0 {
 		return
 	}
 
-	// Find the section at the current scroll position by scanning from
-	// the scroll line upward until we find a line tagged with a section.
-	for i := d.scroll; i >= 0; i-- {
-		if i < len(d.lineSection) && d.lineSection[i] >= 0 {
-			sk := d.lineSection[i]
-			d.collapsed[sk] = !d.collapsed[sk]
-			d.buildContent()
-			// Clamp scroll after rebuild.
-			maxScroll := max(0, len(d.lines)-d.visibleLines())
-			if d.scroll > maxScroll {
-				d.scroll = maxScroll
-			}
-			return
+	// Scan the visible viewport for the first section-tagged line.
+	vis := d.visibleLines()
+	end := min(d.scroll+vis, len(d.lineSection))
+	sk := sectionKind(-1)
+	for i := d.scroll; i < end; i++ {
+		if d.lineSection[i] >= 0 {
+			sk = d.lineSection[i]
+			break
 		}
+	}
+	// Fallback: scan upward from scroll if nothing in viewport.
+	if sk < 0 {
+		for i := d.scroll - 1; i >= 0; i-- {
+			if d.lineSection[i] >= 0 {
+				sk = d.lineSection[i]
+				break
+			}
+		}
+	}
+	if sk < 0 {
+		return
+	}
+
+	d.collapsed[sk] = !d.collapsed[sk]
+
+	// Remember the section we toggled so we can re-anchor scroll to it.
+	savedSection := sk
+	d.buildContent()
+
+	// Find where that section header ended up after rebuild and scroll to it.
+	for i, s := range d.lineSection {
+		if s == savedSection {
+			d.scroll = i
+			break
+		}
+	}
+	// Clamp scroll.
+	maxScroll := max(0, len(d.lines)-d.visibleLines())
+	if d.scroll > maxScroll {
+		d.scroll = maxScroll
 	}
 }
 
