@@ -42,9 +42,34 @@ type Issue struct {
 }
 
 // IssueWithDepType is an issue with a dependency type annotation.
+// It handles two JSON formats:
+//   - bd show: full issue fields with "id" and "dependency_type"
+//   - bd list: raw dependency record with "depends_on_id" and "type"
 type IssueWithDepType struct {
 	Issue
 	DependencyType string `json:"dependency_type"`
+
+	// Raw dependency fields from bd list JSON format.
+	DependsOnID string `json:"depends_on_id,omitempty"`
+	DepType     string `json:"type,omitempty"`
+}
+
+// ParentID returns the parent issue ID from whichever JSON format was used.
+// For bd show dependents, the parent is the issue that was shown (not in this struct).
+// For bd list dependencies, the parent is in DependsOnID.
+func (d *IssueWithDepType) ParentID() string {
+	if d.DependsOnID != "" {
+		return d.DependsOnID
+	}
+	return d.ID
+}
+
+// DepTypeValue returns the dependency type from whichever JSON format was used.
+func (d *IssueWithDepType) DepTypeValue() string {
+	if d.DepType != "" {
+		return d.DepType
+	}
+	return d.DependencyType
 }
 
 // Comment represents a comment on an issue.

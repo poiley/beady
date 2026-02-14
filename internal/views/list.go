@@ -168,25 +168,16 @@ func (l *ListView) SetData(issues []models.Issue, readyIssues []models.Issue, st
 		l.readyIDs[ri.ID] = true
 	}
 
-	// Calculate closed children counts for epics/parents.
-	// Since bd list doesn't include parent field, infer parent-child relationships
-	// from ID patterns: children have IDs like "parent-id.N" or "parent-id.abc".
+	// Calculate closed children counts for epics/parents using the dependency
+	// graph. Each child issue has a "parent-child" dependency pointing to its
+	// parent via depends_on_id. This is more accurate than ID pattern matching
+	// because children can have independent IDs (e.g., kubrick-0z4 is a child
+	// of kubrick-drj despite not matching the kubrick-drj.* pattern).
 	l.closedChildrenCount = make(map[string]int)
 	for _, issue := range issues {
-		// Check if this issue ID contains a dot (potential child).
-		if dotIdx := strings.LastIndex(issue.ID, "."); dotIdx > 0 {
-			// Extract parent ID (everything before the last dot).
-			parentID := issue.ID[:dotIdx]
-			// Only count if parent exists in the issue list.
-			parentExists := false
-			for _, p := range issues {
-				if p.ID == parentID {
-					parentExists = true
-					break
-				}
-			}
-			if parentExists && issue.Status == "closed" {
-				l.closedChildrenCount[parentID]++
+		for _, dep := range issue.Dependencies {
+			if dep.DepTypeValue() == "parent-child" && issue.Status == "closed" {
+				l.closedChildrenCount[dep.ParentID()]++
 			}
 		}
 	}
