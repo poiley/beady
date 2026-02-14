@@ -13,11 +13,12 @@ import (
 
 // DetailView shows full details for a single issue.
 type DetailView struct {
-	issue  *models.Issue
-	width  int
-	height int
-	scroll int
-	lines  []string // pre-rendered content lines
+	issue     *models.Issue
+	width     int
+	height    int
+	scroll    int
+	lines     []string // pre-rendered content lines
+	statusMsg string   // temporary status bar message
 }
 
 // NewDetailView creates a detail view for an issue.
@@ -40,6 +41,11 @@ func (d *DetailView) IssueID() string {
 		return ""
 	}
 	return d.issue.ID
+}
+
+// SetStatusMsg sets a temporary status bar message.
+func (d *DetailView) SetStatusMsg(msg string) {
+	d.statusMsg = msg
 }
 
 // UpdateIssue replaces the issue data and re-renders content while
@@ -321,6 +327,12 @@ func (d *DetailView) renderContent() string {
 }
 
 func (d *DetailView) renderStatusBar() string {
+	if d.statusMsg != "" {
+		return ui.StatusBarStyle.Width(d.width).Render(
+			lipgloss.NewStyle().Foreground(ui.ColorGreen).Render(d.statusMsg),
+		)
+	}
+
 	keys := []struct{ key, desc string }{
 		{"esc", "back"},
 		{"j/k", "scroll"},

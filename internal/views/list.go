@@ -116,6 +116,9 @@ type ListView struct {
 
 	// Completion tracking for epics/parents.
 	closedChildrenCount map[string]int // parent ID -> count of closed children
+
+	// Temporary status message shown in the status bar.
+	statusMsg string
 }
 
 // NewListView creates a new list view.
@@ -209,6 +212,11 @@ func (l *ListView) SelectedIssue() *models.Issue {
 		return nil
 	}
 	return &l.filtered[l.cursor]
+}
+
+// SetStatusMsg sets a temporary status bar message.
+func (l *ListView) SetStatusMsg(msg string) {
+	l.statusMsg = msg
 }
 
 // IsFiltering returns whether the filter input is active.
@@ -713,6 +721,12 @@ func (l *ListView) renderTable() string {
 }
 
 func (l *ListView) renderStatusBar() string {
+	if l.statusMsg != "" {
+		return ui.StatusBarStyle.Width(l.width).Render(
+			lipgloss.NewStyle().Foreground(ui.ColorGreen).Render(l.statusMsg),
+		)
+	}
+
 	closedLabel := "show closed"
 	if !l.hideClosed {
 		closedLabel = "hide closed"

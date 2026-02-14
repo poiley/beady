@@ -38,6 +38,9 @@ type detailLoadedMsg struct {
 	quiet bool // true for auto-refresh
 }
 
+// statusClearMsg signals that the status message should be cleared.
+type statusClearMsg struct{}
+
 // App is the root Bubble Tea model.
 type App struct {
 	client   *bd.Client
@@ -52,6 +55,9 @@ type App struct {
 	height   int
 	err      error
 	loading  bool
+
+	// Temporary status bar message (e.g., "copied kubrick-drj").
+	statusMsg string
 
 	// Navigation stack for detail -> dependency drill-down
 	detailStack []*views.DetailView
@@ -130,6 +136,14 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case views.FlashExpiredMsg:
 		a.list.ClearFlashes()
+		return a, nil
+
+	case statusClearMsg:
+		a.statusMsg = ""
+		a.list.SetStatusMsg("")
+		if a.detail != nil {
+			a.detail.SetStatusMsg("")
+		}
 		return a, nil
 
 	case detailLoadedMsg:
@@ -229,6 +243,7 @@ func (a *App) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if !a.list.IsFiltering() {
 			if issue := a.list.SelectedIssue(); issue != nil {
 				copyToClipboard(issue.ID)
+				return a, a.setStatus(fmt.Sprintf("copied %s", issue.ID))
 			}
 			return a, nil
 		}
@@ -251,6 +266,7 @@ func (a *App) updateDetail(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "y":
 		if a.detail != nil {
 			copyToClipboard(a.detail.IssueID())
+			return a, a.setStatus(fmt.Sprintf("copied %s", a.detail.IssueID()))
 		}
 		return a, nil
 	}
@@ -338,6 +354,17 @@ func (a *App) loadDetailWithOpts(id string, quiet bool) tea.Cmd {
 		issue, err := a.client.Show(id)
 		return detailLoadedMsg{issue: issue, err: err, quiet: quiet}
 	}
+}
+
+func (a *App) setStatus(msg string) tea.Cmd {
+	a.statusMsg = msg
+	a.list.SetStatusMsg(msg)
+	if a.detail != nil {
+		a.detail.SetStatusMsg(msg)
+	}
+	return tea.Tick(2*time.Second, func(t time.Time) tea.Msg {
+		return statusClearMsg{}
+	})
 }
 
 func copyToClipboard(text string) {
