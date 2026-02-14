@@ -555,9 +555,10 @@ const (
 	colIdxDone     = 4
 	colIdxTitle    = 5
 	colIdxAssignee = 6
-	colIdxAge      = 7
-	colIdxCmt      = 8
-	colIdxDeps     = 9
+	colIdxDue      = 7
+	colIdxAge      = 8
+	colIdxCmt      = 9
+	colIdxDeps     = 10
 )
 
 func (l *ListView) renderTable() string {
@@ -584,6 +585,7 @@ func (l *ListView) renderTable() string {
 		&ui.Column{Header: "DONE", Size: ui.SizeFit, Align: ui.AlignRight, Min: 4, Max: 7},
 		&ui.Column{Header: "TITLE", Size: ui.SizeFlex, Align: ui.AlignLeft, Min: 10},
 		&ui.Column{Header: "ASSIGNEE", Size: ui.SizeFit, Align: ui.AlignRight, Min: 1, Max: 14},
+		&ui.Column{Header: "DUE", Size: ui.SizeFit, Align: ui.AlignRight, Min: 1, Max: 6},
 		&ui.Column{Header: "AGE", Size: ui.SizeFit, Align: ui.AlignRight, Min: 3, Max: 5},
 		&ui.Column{Header: "CMT", Size: ui.SizeFit, Align: ui.AlignRight, Min: 1, Max: 4},
 		&ui.Column{Header: "DEPS", Size: ui.SizeFit, Align: ui.AlignRight, Min: 4, Max: 7},
@@ -592,7 +594,7 @@ func (l *ListView) renderTable() string {
 
 	// Scan data to compute max display widths per column (for SizeFit columns).
 	// Uses ui.StringWidth to correctly handle wide/multi-byte characters.
-	dataWidths := make([]int, 10)
+	dataWidths := make([]int, 11)
 	for _, issue := range l.filtered {
 		if n := ui.StringWidth(issue.ID); n > dataWidths[colIdxID] {
 			dataWidths[colIdxID] = n
@@ -616,6 +618,13 @@ func (l *ListView) renderTable() string {
 		// TITLE is flex, no scan needed.
 		if n := ui.StringWidth(issue.Assignee); n > dataWidths[colIdxAssignee] {
 			dataWidths[colIdxAssignee] = n
+		}
+		due := ""
+		if issue.DueAt != nil {
+			due = models.RelativeAge(*issue.DueAt)
+		}
+		if n := ui.StringWidth(due); n > dataWidths[colIdxDue] {
+			dataWidths[colIdxDue] = n
 		}
 		age := models.RelativeAge(issue.CreatedAt)
 		if n := ui.StringWidth(age); n > dataWidths[colIdxAge] {
@@ -646,7 +655,7 @@ func (l *ListView) renderTable() string {
 	tbl.Resolve(l.width-cursorWidth, dataWidths)
 
 	// Render header row.
-	headers := make([]string, 10)
+	headers := make([]string, 11)
 	for i, col := range tbl.Columns {
 		headers[i] = col.Header
 	}
@@ -677,6 +686,10 @@ func (l *ListView) renderTable() string {
 			closedCount := l.closedChildrenCount[issue.ID]
 			done = fmt.Sprintf("%d/%d", closedCount, issue.DependentCount)
 		}
+		due := ""
+		if issue.DueAt != nil {
+			due = models.RelativeAge(*issue.DueAt)
+		}
 		cmt := ""
 		if issue.CommentCount > 0 {
 			cmt = fmt.Sprintf("%d", issue.CommentCount)
@@ -694,6 +707,7 @@ func (l *ListView) renderTable() string {
 			done,
 			issue.Title,
 			assignee,
+			due,
 			models.RelativeAge(issue.CreatedAt),
 			cmt,
 			deps,
@@ -701,6 +715,7 @@ func (l *ListView) renderTable() string {
 
 		// Style function: pad happens first inside RenderRow, then this
 		// wraps the already-padded plain text in ANSI colors.
+		isOverdue := issue.DueAt != nil && issue.Status != "closed" && time.Now().After(*issue.DueAt)
 		styleFn := func(col int, padded string) string {
 			switch col {
 			case colIdxPri:
@@ -709,6 +724,11 @@ func (l *ListView) renderTable() string {
 				return ui.StatusStyle(issue.Status).Render(padded)
 			case colIdxType:
 				return ui.TypeStyle(issue.IssueType).Render(padded)
+			case colIdxDue:
+				if isOverdue {
+					return ui.ErrorStyle.Render(padded)
+				}
+				return lipgloss.NewStyle().Foreground(ui.ColorGray).Render(padded)
 			default:
 				return padded
 			}
