@@ -55,7 +55,7 @@ func (h *HelpView) View() string {
 			header: "Filtering",
 			keys: []struct{ key, desc string }{
 				{"/", "Start text search (filters on title, ID, type, assignee, labels)"},
-				{"Esc", "Clear search input"},
+				{"Esc", "Cancel search (restore previous)"},
 				{"1", "Toggle: open issues only"},
 				{"2", "Toggle: in_progress only"},
 				{"3", "Toggle: blocked only"},

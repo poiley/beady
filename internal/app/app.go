@@ -252,8 +252,10 @@ func (a *App) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "y":
 		if !a.list.IsFiltering() {
 			if issue := a.list.SelectedIssue(); issue != nil {
-				copyToClipboard(issue.ID)
-				return a, a.setStatus(fmt.Sprintf("copied %s", issue.ID))
+				if copyToClipboard(issue.ID) {
+					return a, a.setStatus(fmt.Sprintf("copied %s", issue.ID))
+				}
+				return a, a.setStatus("clipboard not available on this platform")
 			}
 			return a, nil
 		}
@@ -275,8 +277,10 @@ func (a *App) updateDetail(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 	case "y":
 		if a.detail != nil {
-			copyToClipboard(a.detail.IssueID())
-			return a, a.setStatus(fmt.Sprintf("copied %s", a.detail.IssueID()))
+			if copyToClipboard(a.detail.IssueID()) {
+				return a, a.setStatus(fmt.Sprintf("copied %s", a.detail.IssueID()))
+			}
+			return a, a.setStatus("clipboard not available on this platform")
 		}
 		return a, nil
 	}
@@ -377,7 +381,9 @@ func (a *App) setStatus(msg string) tea.Cmd {
 	})
 }
 
-func copyToClipboard(text string) {
+// copyToClipboard copies text to the system clipboard.
+// Returns true if a clipboard command was available, false otherwise.
+func copyToClipboard(text string) bool {
 	var cmd *exec.Cmd
 	switch runtime.GOOS {
 	case "darwin":
@@ -385,10 +391,11 @@ func copyToClipboard(text string) {
 	case "linux":
 		cmd = exec.Command("xclip", "-selection", "clipboard")
 	default:
-		return
+		return false
 	}
 	cmd.Stdin = strings.NewReader(text)
 	_ = cmd.Run()
+	return true
 }
 
 func loadingView(width, height int) string {

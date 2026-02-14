@@ -90,32 +90,11 @@ func getLatestRelease() (*githubRelease, error) {
 }
 
 func getAssetName() string {
-	os := runtime.GOOS
-	arch := runtime.GOARCH
-
-	// Match goreleaser naming convention
-	switch os {
-	case "darwin":
-		os = "darwin"
-	case "linux":
-		os = "linux"
-	case "windows":
-		os = "windows"
-	}
-
-	switch arch {
-	case "amd64":
-		arch = "amd64"
-	case "arm64":
-		arch = "arm64"
-	}
-
 	ext := ".tar.gz"
 	if runtime.GOOS == "windows" {
 		ext = ".zip"
 	}
-
-	return fmt.Sprintf("bdy_%s_%s%s", os, arch, ext)
+	return fmt.Sprintf("bdy_%s_%s%s", runtime.GOOS, runtime.GOARCH, ext)
 }
 
 func downloadAndInstall(url, version string) error {
@@ -145,11 +124,11 @@ func downloadAndInstall(url, version string) error {
 	tmpFile.Close()
 
 	// Extract the binary
-	binPath, err := extractBinary(tmpFile.Name())
+	binPath, extractDir, err := extractBinary(tmpFile.Name())
 	if err != nil {
 		return fmt.Errorf("extracting: %w", err)
 	}
-	defer os.Remove(binPath)
+	defer os.RemoveAll(extractDir)
 
 	// Find current binary location
 	currentBin, err := os.Executable()
@@ -170,17 +149,27 @@ func downloadAndInstall(url, version string) error {
 	return nil
 }
 
-func extractBinary(archivePath string) (string, error) {
-	tmpDir, err := os.MkdirTemp("", "bdy-extract-*")
+// extractBinary extracts the bdy binary from an archive.
+// Returns the binary path and the temp directory (caller must clean up tmpDir).
+func extractBinary(archivePath string) (binPath string, tmpDir string, err error) {
+	tmpDir, err = os.MkdirTemp("", "bdy-extract-*")
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 
-	// Use tar to extract
-	cmd := exec.Command("tar", "xzf", archivePath, "-C", tmpDir)
-	if out, err := cmd.CombinedOutput(); err != nil {
-		os.RemoveAll(tmpDir)
-		return "", fmt.Errorf("tar extract failed: %s: %w", string(out), err)
+	// Extract archive: tar for .tar.gz, unzip for .zip
+	if strings.HasSuffix(archivePath, ".zip") || runtime.GOOS == "windows" {
+		cmd := exec.Command("unzip", "-o", archivePath, "-d", tmpDir)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			os.RemoveAll(tmpDir)
+			return "", "", fmt.Errorf("unzip failed: %s: %w", string(out), err)
+		}
+	} else {
+		cmd := exec.Command("tar", "xzf", archivePath, "-C", tmpDir)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			os.RemoveAll(tmpDir)
+			return "", "", fmt.Errorf("tar extract failed: %s: %w", string(out), err)
+		}
 	}
 
 	// Find the bdy binary in extracted files
@@ -189,7 +178,7 @@ func extractBinary(archivePath string) (string, error) {
 		binName = "bdy.exe"
 	}
 
-	binPath := filepath.Join(tmpDir, binName)
+	binPath = filepath.Join(tmpDir, binName)
 	if _, err := os.Stat(binPath); err != nil {
 		// Try looking in subdirectories (goreleaser sometimes nests)
 		entries, _ := os.ReadDir(tmpDir)
@@ -206,10 +195,10 @@ func extractBinary(archivePath string) (string, error) {
 
 	if _, err := os.Stat(binPath); err != nil {
 		os.RemoveAll(tmpDir)
-		return "", fmt.Errorf("binary not found in archive")
+		return "", "", fmt.Errorf("binary not found in archive")
 	}
 
-	return binPath, nil
+	return binPath, tmpDir, nil
 }
 
 func replaceBinary(newBin, currentBin string) error {

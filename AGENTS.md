@@ -13,7 +13,9 @@
 ```
 cmd/bdy/main.go              Entry point, CLI flags, version vars (set via ldflags)
 internal/
-  app/app.go                  Root Bubble Tea model, navigation stack, data loading
+  app/
+    app.go                    Root Bubble Tea model, navigation stack, data loading
+    watcher.go                fsnotify-based database watcher (auto-refresh on .beads/ changes)
   bd/client.go                bd CLI wrapper (exec bd --json, parse response)
   models/issue.go             Data structs matching bd JSON output
   selfupdate/update.go        Self-update via GitHub Releases API

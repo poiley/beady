@@ -195,11 +195,6 @@ func (l *ListView) ClearFlashes() {
 	l.flashIDs = make(map[string]bool)
 }
 
-// HasFlashes returns whether any rows are currently flashing.
-func (l *ListView) HasFlashes() bool {
-	return len(l.flashIDs) > 0
-}
-
 // SetSize sets the terminal dimensions.
 func (l *ListView) SetSize(w, h int) {
 	l.width = w

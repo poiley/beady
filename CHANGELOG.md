@@ -7,10 +7,52 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.2.1] - 2026-02-14
+
 ### Fixed
-- Fix panic: increase header array size from 8 to 9 columns to match actual column count
+- Fix status bar not sticking to terminal bottom (overhead was 6, should be 4)
+
+## [1.2.0] - 2026-02-14
 
 ### Added
+- Drill-down navigation in detail view: Tab/Shift+Tab to cycle through dependencies, Enter to drill in, Esc to pop back
+- Pinned issue indicator (`*` prefix in yellow) with sort-to-top
+- DUE column with red overdue highlighting for non-closed issues
+- CMT column showing comment count
+- Copy feedback: status bar shows "copied <id>" for 2 seconds on `y`
+- Deferred (`6`) and pinned (`7`) status filters
+- Labels now included in `/` text filter search
+
+### Changed
+- Styled loading and error views with centered layout, themed colors, and bordered error box
+- Renamed `ui_errorView` to `errorView` (Go naming convention)
+
+### Fixed
+- Text wrapping for CJK/wide characters in detail view (use runewidth instead of byte length)
+
+### Removed
+- Dead code: unused `client.List()` method and duplicate flash detection loop
+
+## [1.1.4] - 2026-02-14
+
+### Fixed
+- Fix footer not sticking to bottom: account for table header border line in overhead calculation
+
+## [1.1.3] - 2026-02-14
+
+### Changed
+- Rename dependency count column header from `↑/↓` to `DEPS` for clarity
+
+## [1.1.2] - 2026-02-14
+
+### Fixed
+- Fix DONE column: use dependency graph (`parent-child` type) instead of ID pattern matching for counting closed children
+
+## [1.1.1] - 2026-02-14
+
+### Added
+- Add CHANGELOG.md with complete release history
+- Fix panic: increase header array size from 8 to 9 columns
 - Add DONE column showing epic/parent completion progress (closed/total dependents)
 
 ### Changed
@@ -68,7 +110,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Curl-pipe-bash installer script
 - GoReleaser configuration for automated releases
 
-[Unreleased]: https://github.com/poiley/beady/compare/v1.1.0...HEAD
+[Unreleased]: https://github.com/poiley/beady/compare/v1.2.1...HEAD
+[1.2.1]: https://github.com/poiley/beady/compare/v1.2.0...v1.2.1
+[1.2.0]: https://github.com/poiley/beady/compare/v1.1.4...v1.2.0
+[1.1.4]: https://github.com/poiley/beady/compare/v1.1.3...v1.1.4
+[1.1.3]: https://github.com/poiley/beady/compare/v1.1.2...v1.1.3
+[1.1.2]: https://github.com/poiley/beady/compare/v1.1.1...v1.1.2
+[1.1.1]: https://github.com/poiley/beady/compare/v1.1.0...v1.1.1
 [1.1.0]: https://github.com/poiley/beady/compare/v1.0.2...v1.1.0
 [1.0.2]: https://github.com/poiley/beady/compare/v1.0.1...v1.0.2
 [1.0.1]: https://github.com/poiley/beady/compare/v1.0.0...v1.0.1

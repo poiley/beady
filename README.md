@@ -71,7 +71,8 @@ bdy help         Show help
 | `j` / `k` | Move down / up |
 | `g` / `G` | Jump to top / bottom |
 | `Ctrl+u` / `Ctrl+d` | Page up / down |
-| `Enter` | Open issue detail view |
+| `Enter` | Open issue detail / drill into selected dependency |
+| `Tab` / `Shift+Tab` | Cycle through dependencies in detail view |
 | `Esc` | Back to list / cancel filter |
 
 ### Sorting
@@ -81,18 +82,20 @@ bdy help         Show help
 | `s` | Cycle sort field: priority > created > updated > status > type > id |
 | `S` | Reverse sort direction |
 
-Default sort is by **priority** (P0 first), then by **created date** (newest first).
+Default sort is by **priority** (P0 first), then by **created date** (newest first). Pinned issues always sort above unpinned issues.
 
 ### Filtering
 
 | Key | Action |
 |-----|--------|
-| `/` | Text search (matches title, ID, type, assignee) |
+| `/` | Text search (matches title, ID, type, assignee, labels) |
 | `1` | Toggle: open only |
 | `2` | Toggle: in_progress only |
 | `3` | Toggle: blocked only |
 | `4` | Toggle: closed only |
 | `5` | Toggle: ready (unblocked) only |
+| `6` | Toggle: deferred only |
+| `7` | Toggle: pinned only |
 | `0` | Show all statuses |
 | `c` | Toggle: show/hide closed issues (hidden by default) |
 
@@ -101,7 +104,7 @@ Default sort is by **priority** (P0 first), then by **created date** (newest fir
 | Key | Action |
 |-----|--------|
 | `r` | Refresh data from bd |
-| `y` | Copy issue ID to clipboard |
+| `y` | Copy issue ID to clipboard (shows confirmation in status bar) |
 | `?` | Toggle help overlay |
 | `q` | Quit (or back from detail view) |
 
@@ -109,15 +112,18 @@ Default sort is by **priority** (P0 first), then by **created date** (newest fir
 
 ### List view
 
-The default view. Full-screen table showing all issues with columns for ID, priority, status, type, title, assignee, age, and dependency counts.
+The default view. Full-screen table showing all issues with columns for ID, priority, status, type, done (epic completion), title, assignee, due date, age, comment count, and dependency counts. Pinned issues are marked with `*` and highlighted in yellow.
 
 - Priority is color-coded: P0 red, P1 yellow, P2 white, P3 gray
 - Status is color-coded: open green, in_progress cyan, blocked red, closed gray
+- Overdue issues have their DUE column highlighted in red
 - Header shows aggregate counts from `bd stats`
 
 ### Detail view
 
 Press `Enter` on any issue to see full details: all metadata fields, description, design notes, acceptance criteria, notes, dependencies (with type), dependents, and comments. Scrollable with `j`/`k`.
+
+Use `Tab`/`Shift+Tab` to select dependencies or dependents, then `Enter` to drill into them. Press `Esc` to go back. The navigation stack supports arbitrary depth.
 
 ### Help overlay
 
@@ -134,12 +140,16 @@ bdy is a thin UI layer that shells out to the `bd` CLI with `--json` for all dat
 
 It never touches the `.beads/` database directly. No write operations. No daemon interaction.
 
+Data is automatically refreshed when the beads database changes on disk (via fsnotify file watching). Changed rows flash briefly with a gold highlight (k9s-style pulse).
+
 ## Architecture
 
 ```
 cmd/bdy/main.go              Entry point, CLI flags, self-update
 internal/
-  app/app.go                  Root Bubble Tea model, navigation, data loading
+  app/
+    app.go                    Root Bubble Tea model, navigation, data loading
+    watcher.go                fsnotify-based database watcher (auto-refresh)
   bd/client.go                bd CLI wrapper (exec + JSON parse)
   models/issue.go             Issue/Comment/Stats structs
   selfupdate/update.go        GitHub Releases self-updater
@@ -148,7 +158,7 @@ internal/
     table.go                  Generic table layout engine (Fixed/Fit/Flex columns)
   views/
     list.go                   Main table view (sort, filter, scroll)
-    detail.go                 Single issue detail view
+    detail.go                 Single issue detail view with drill-down
     help.go                   Help overlay
 scripts/
   install.sh                  curl-pipe-bash installer
@@ -160,6 +170,7 @@ Built with:
 - [Lipgloss](https://github.com/charmbracelet/lipgloss) - Styling
 - [Bubbles](https://github.com/charmbracelet/bubbles) - Text input component
 - [go-runewidth](https://github.com/mattn/go-runewidth) - Unicode-aware string width
+- [fsnotify](https://github.com/fsnotify/fsnotify) - File system notifications
 
 ## Updating
 

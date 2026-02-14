@@ -15,3 +15,6 @@
 
 # Beads (local test data)
 .beads/
+
+# Git worktrees
+.worktrees/

@@ -50,7 +50,11 @@ func main() {
 			}
 			os.Exit(0)
 		case "--check", "check":
-			workDir, _ := os.Getwd()
+			workDir, err := os.Getwd()
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Error: %s\n", err)
+				os.Exit(1)
+			}
 			client := bd.NewClient(workDir)
 			if err := client.CheckInit(); err != nil {
 				fmt.Fprintf(os.Stderr, "Error: %s\n", err)
