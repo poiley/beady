@@ -398,6 +398,14 @@ func (l *ListView) matchesTextFilter(issue models.Issue) bool {
 }
 
 func (l *ListView) compareIssues(a, b models.Issue) int {
+	// Pinned issues always sort above unpinned at the same level.
+	if a.Pinned != b.Pinned {
+		if a.Pinned {
+			return -1
+		}
+		return 1
+	}
+
 	switch l.sortField {
 	case SortByPriority:
 		if a.Priority != b.Priority {
@@ -596,7 +604,11 @@ func (l *ListView) renderTable() string {
 	// Uses ui.StringWidth to correctly handle wide/multi-byte characters.
 	dataWidths := make([]int, 11)
 	for _, issue := range l.filtered {
-		if n := ui.StringWidth(issue.ID); n > dataWidths[colIdxID] {
+		idDisplay := issue.ID
+		if issue.Pinned {
+			idDisplay = "* " + idDisplay
+		}
+		if n := ui.StringWidth(idDisplay); n > dataWidths[colIdxID] {
 			dataWidths[colIdxID] = n
 		}
 		// PRI is fixed, no scan needed.
@@ -699,8 +711,13 @@ func (l *ListView) renderTable() string {
 			deps = fmt.Sprintf("%d/%d", issue.DependencyCount, issue.DependentCount)
 		}
 
+		idDisplay := issue.ID
+		if issue.Pinned {
+			idDisplay = "* " + idDisplay
+		}
+
 		cells := []string{
-			issue.ID,
+			idDisplay,
 			issue.PriorityString(),
 			issue.Status,
 			issue.IssueType,
@@ -718,6 +735,11 @@ func (l *ListView) renderTable() string {
 		isOverdue := issue.DueAt != nil && issue.Status != "closed" && time.Now().After(*issue.DueAt)
 		styleFn := func(col int, padded string) string {
 			switch col {
+			case colIdxID:
+				if issue.Pinned {
+					return lipgloss.NewStyle().Foreground(ui.ColorYellow).Render(padded)
+				}
+				return padded
 			case colIdxPri:
 				return ui.PriorityStyle(issue.Priority).Render(padded)
 			case colIdxStatus:
