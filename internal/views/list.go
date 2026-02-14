@@ -65,6 +65,8 @@ const (
 	FilterBlocked
 	FilterClosed
 	FilterReady
+	FilterDeferred
+	FilterPinned
 )
 
 func (f StatusFilter) String() string {
@@ -81,6 +83,10 @@ func (f StatusFilter) String() string {
 		return "closed"
 	case FilterReady:
 		return "ready"
+	case FilterDeferred:
+		return "deferred"
+	case FilterPinned:
+		return "pinned"
 	default:
 		return "all"
 	}
@@ -259,6 +265,10 @@ func (l *ListView) Update(msg tea.Msg) tea.Cmd {
 			l.toggleStatusFilter(FilterClosed)
 		case "5":
 			l.toggleStatusFilter(FilterReady)
+		case "6":
+			l.toggleStatusFilter(FilterDeferred)
+		case "7":
+			l.toggleStatusFilter(FilterPinned)
 		case "0":
 			l.statusFilter = FilterAll
 			l.applyFilterAndSort()
@@ -351,6 +361,10 @@ func (l *ListView) matchesStatusFilter(issue models.Issue) bool {
 		return issue.Status == "closed"
 	case FilterReady:
 		return l.readyIDs[issue.ID]
+	case FilterDeferred:
+		return issue.Status == "deferred"
+	case FilterPinned:
+		return issue.Pinned
 	default:
 		return true
 	}
@@ -708,7 +722,7 @@ func (l *ListView) renderStatusBar() string {
 		{"/", "filter"},
 		{"s", "sort"},
 		{"S", "reverse"},
-		{"1-5", "status"},
+		{"1-7", "status"},
 		{"0", "all"},
 		{"c", closedLabel},
 		{"r", "refresh"},

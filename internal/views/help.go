@@ -53,13 +53,15 @@ func (h *HelpView) View() string {
 		{
 			header: "Filtering",
 			keys: []struct{ key, desc string }{
-				{"/", "Start text search (filters on title, ID, type, assignee)"},
+				{"/", "Start text search (filters on title, ID, type, assignee, labels)"},
 				{"Esc", "Clear search input"},
 				{"1", "Toggle: open issues only"},
 				{"2", "Toggle: in_progress only"},
 				{"3", "Toggle: blocked only"},
 				{"4", "Toggle: closed only"},
 				{"5", "Toggle: ready (unblocked) only"},
+				{"6", "Toggle: deferred only"},
+				{"7", "Toggle: pinned only"},
 				{"0", "Show all statuses"},
 				{"c", "Toggle: show/hide closed issues (hidden by default)"},
 			},
