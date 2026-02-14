@@ -166,6 +166,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			a.detail = views.NewDetailView(msg.issue)
 			a.detail.SetSize(a.width, a.height)
+			a.detail.SetBreadcrumbs(a.breadcrumbTrail())
 			a.viewMode = ViewDetail
 		}
 		return a, nil
@@ -300,6 +301,19 @@ func (a *App) popDetail() {
 		a.detail = nil
 		a.viewMode = ViewList
 	}
+}
+
+// breadcrumbTrail returns the issue IDs currently in the detail stack,
+// used to show a navigation path in the detail header.
+func (a *App) breadcrumbTrail() []string {
+	if len(a.detailStack) == 0 {
+		return nil
+	}
+	crumbs := make([]string, len(a.detailStack))
+	for i, dv := range a.detailStack {
+		crumbs[i] = dv.IssueID()
+	}
+	return crumbs
 }
 
 // View renders the current view.

@@ -68,6 +68,12 @@ func (h *HelpView) View() string {
 			},
 		},
 		{
+			header: "Detail View",
+			keys: []struct{ key, desc string }{
+				{"x", "Collapse / expand section under cursor"},
+			},
+		},
+		{
 			header: "Actions",
 			keys: []struct{ key, desc string }{
 				{"r", "Refresh data from bd"},

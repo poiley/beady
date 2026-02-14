@@ -26,6 +26,7 @@ type Issue struct {
 	CloseReason        string     `json:"close_reason,omitempty"`
 	DueAt              *time.Time `json:"due_at,omitempty"`
 	DeferUntil         *time.Time `json:"defer_until,omitempty"`
+	EstimatedMinutes   int        `json:"estimated_minutes,omitempty"`
 	Pinned             bool       `json:"pinned,omitempty"`
 
 	// Counts from bd list
@@ -103,6 +104,39 @@ type StatsSummary struct {
 // PriorityString returns "P0", "P1", etc.
 func (i *Issue) PriorityString() string {
 	return fmt.Sprintf("P%d", i.Priority)
+}
+
+// EstimateString returns a human-readable estimate like "2h", "1d 4h", or "".
+func (i *Issue) EstimateString() string {
+	m := i.EstimatedMinutes
+	if m <= 0 {
+		return ""
+	}
+	if m < 60 {
+		return fmt.Sprintf("%dm", m)
+	}
+	h := m / 60
+	rem := m % 60
+	if h < 24 {
+		if rem > 0 {
+			return fmt.Sprintf("%dh %dm", h, rem)
+		}
+		return fmt.Sprintf("%dh", h)
+	}
+	d := h / 8 // workday = 8h
+	rh := h % 8
+	if rh > 0 {
+		return fmt.Sprintf("%dd %dh", d, rh)
+	}
+	return fmt.Sprintf("%dd", d)
+}
+
+// LeadTime returns the duration from creation to close, or zero if not closed.
+func (i *Issue) LeadTime() time.Duration {
+	if i.ClosedAt == nil {
+		return 0
+	}
+	return i.ClosedAt.Sub(i.CreatedAt)
 }
 
 // RelativeAge returns a human-readable relative time string.

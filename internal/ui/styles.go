@@ -174,6 +174,30 @@ func TypeStyle(issueType string) lipgloss.Style {
 	}
 }
 
+// StatusBadge returns a colored icon + status string for compact display in
+// dependency/dependent lists.
+func StatusBadge(status string) string {
+	switch status {
+	case "closed":
+		return lipgloss.NewStyle().Foreground(ColorGreen).Render("✓") + " " +
+			StatusStyle(status).Render(status)
+	case "blocked":
+		return lipgloss.NewStyle().Foreground(ColorRed).Render("✗") + " " +
+			StatusStyle(status).Render(status)
+	case "in_progress":
+		return lipgloss.NewStyle().Foreground(ColorCyan).Render("●") + " " +
+			StatusStyle(status).Render(status)
+	case "open":
+		return lipgloss.NewStyle().Foreground(ColorGreen).Render("○") + " " +
+			StatusStyle(status).Render(status)
+	case "deferred":
+		return lipgloss.NewStyle().Foreground(ColorMagenta).Render("◌") + " " +
+			StatusStyle(status).Render(status)
+	default:
+		return StatusStyle(status).Render(status)
+	}
+}
+
 // ContentHeight computes how many lines remain for scrollable content after
 // subtracting the rendered chrome. Each chrome argument is an already-rendered
 // string whose actual line count is measured with lipgloss.Height, so wrapping

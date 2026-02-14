@@ -3,6 +3,7 @@ package views
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -15,6 +16,20 @@ import (
 type NavigateToIssueMsg struct {
 	ID string
 }
+
+// sectionKind identifies a collapsible section in the detail view.
+type sectionKind int
+
+const (
+	sectionDescription sectionKind = iota
+	sectionDesign
+	sectionAcceptance
+	sectionNotes
+	sectionDeps
+	sectionDependents
+	sectionComments
+	sectionCount // sentinel — total number of section kinds
+)
 
 // navItem maps a rendered line to a navigable issue.
 type navItem struct {
@@ -31,9 +46,15 @@ type DetailView struct {
 	lines     []string // pre-rendered content lines
 	statusMsg string   // temporary status bar message
 
-	// Navigation within deps/dependents.
-	navItems  []navItem // navigable lines (dependencies + dependents)
+	// Navigation within parent/deps/dependents.
+	navItems  []navItem // navigable lines (parent + dependencies + dependents)
 	navCursor int       // index into navItems, -1 = none selected
+
+	// Breadcrumb trail (set by app when drilling into deps).
+	breadcrumbs []string // issue IDs from root to current (exclusive)
+
+	// Collapsible sections.
+	collapsed [sectionCount]bool
 }
 
 // NewDetailView creates a detail view for an issue.
@@ -61,6 +82,11 @@ func (d *DetailView) IssueID() string {
 // SetStatusMsg sets a temporary status bar message.
 func (d *DetailView) SetStatusMsg(msg string) {
 	d.statusMsg = msg
+}
+
+// SetBreadcrumbs sets the navigation trail shown in the header.
+func (d *DetailView) SetBreadcrumbs(crumbs []string) {
+	d.breadcrumbs = crumbs
 }
 
 // UpdateIssue replaces the issue data and re-renders content while
@@ -129,9 +155,72 @@ func (d *DetailView) Update(msg tea.Msg) tea.Cmd {
 					return NavigateToIssueMsg{ID: id}
 				}
 			}
+		case "x":
+			// Toggle collapse on the section header nearest above the cursor.
+			d.toggleSectionAtScroll()
 		}
 	}
 	return nil
+}
+
+// toggleSectionAtScroll finds the section header at or above the current
+// scroll position and toggles its collapsed state.
+func (d *DetailView) toggleSectionAtScroll() {
+	if d.issue == nil {
+		return
+	}
+	// Check which section the nav cursor is in (if any), otherwise
+	// use the scroll position.
+	targetLine := d.scroll
+	if d.navCursor >= 0 && d.navCursor < len(d.navItems) {
+		targetLine = d.navItems[d.navCursor].lineIndex
+	}
+
+	// Walk sections to find which one contains targetLine.
+	type sectionRange struct {
+		kind  sectionKind
+		start int
+	}
+	var sections []sectionRange
+	for i, line := range d.lines {
+		for sk := sectionKind(0); sk < sectionCount; sk++ {
+			label := sectionLabel(sk)
+			if label != "" && strings.Contains(line, label) {
+				sections = append(sections, sectionRange{kind: sk, start: i})
+				break
+			}
+		}
+	}
+
+	// Find the last section whose start <= targetLine.
+	for i := len(sections) - 1; i >= 0; i-- {
+		if sections[i].start <= targetLine {
+			d.collapsed[sections[i].kind] = !d.collapsed[sections[i].kind]
+			d.buildContent()
+			return
+		}
+	}
+}
+
+func sectionLabel(sk sectionKind) string {
+	switch sk {
+	case sectionDescription:
+		return "DESCRIPTION"
+	case sectionDesign:
+		return "DESIGN"
+	case sectionAcceptance:
+		return "ACCEPTANCE CRITERIA"
+	case sectionNotes:
+		return "NOTES"
+	case sectionDeps:
+		return "DEPENDENCIES"
+	case sectionDependents:
+		return "DEPENDENTS"
+	case sectionComments:
+		return "COMMENTS"
+	default:
+		return ""
+	}
 }
 
 // scrollToNav scrolls the view to make the current nav item visible.
@@ -199,6 +288,19 @@ func (d *DetailView) renderHeader(vis int) string {
 	itype := ui.TypeStyle(issue.IssueType).Render(issue.IssueType)
 
 	left := fmt.Sprintf("%s  %s  %s  %s", id, pri, status, itype)
+
+	// Breadcrumb trail: show navigation path when drilled into deps.
+	if len(d.breadcrumbs) > 0 {
+		crumbStyle := lipgloss.NewStyle().Foreground(ui.ColorGray)
+		sepStyle := lipgloss.NewStyle().Foreground(ui.ColorDimGray)
+		var crumbs []string
+		for _, c := range d.breadcrumbs {
+			crumbs = append(crumbs, crumbStyle.Render(c))
+		}
+		crumbs = append(crumbs, ui.LogoStyle.Render(issue.ID))
+		trail := strings.Join(crumbs, sepStyle.Render(" > "))
+		left = trail + "  " + pri + "  " + status + "  " + itype
+	}
 
 	scrollInfo := ""
 	if len(d.lines) > vis {
@@ -268,8 +370,20 @@ func (d *DetailView) buildContent() {
 	if issue.DeferUntil != nil {
 		field("Defer Until", issue.DeferUntil.Format("2006-01-02 15:04"))
 	}
+	if est := issue.EstimateString(); est != "" {
+		field("Estimate", est)
+	}
+	if lt := issue.LeadTime(); lt > 0 {
+		field("Lead Time", formatDuration(lt))
+	}
+
+	// Parent — navigable link to drill up the hierarchy.
 	if issue.Parent != nil {
-		field("Parent", *issue.Parent)
+		parentLine := ui.FieldLabelStyle.Render("Parent") +
+			lipgloss.NewStyle().Foreground(ui.ColorBlue).Bold(true).Render(*issue.Parent) +
+			lipgloss.NewStyle().Foreground(ui.ColorDimGray).Render("  (enter to view)")
+		navItems = append(navItems, navItem{lineIndex: len(lines), issueID: *issue.Parent})
+		add(parentLine)
 	}
 
 	// Labels
@@ -277,105 +391,99 @@ func (d *DetailView) buildContent() {
 		field("Labels", strings.Join(issue.Labels, ", "))
 	}
 
+	// --- Collapsible sections ---
+
 	// Description
 	if issue.Description != "" {
 		addBlank()
-		add(ui.SectionHeaderStyle.Render("DESCRIPTION"))
-		add(ui.TableHeaderStyle.Width(contentWidth).Render(""))
-		for _, line := range wrapText(issue.Description, contentWidth) {
-			add(line)
-		}
+		d.addSection(&lines, sectionDescription, "DESCRIPTION", issue.Description, contentWidth)
 	}
 
 	// Design
 	if issue.Design != "" {
 		addBlank()
-		add(ui.SectionHeaderStyle.Render("DESIGN"))
-		add(ui.TableHeaderStyle.Width(contentWidth).Render(""))
-		for _, line := range wrapText(issue.Design, contentWidth) {
-			add(line)
-		}
+		d.addSection(&lines, sectionDesign, "DESIGN", issue.Design, contentWidth)
 	}
 
 	// Acceptance Criteria
 	if issue.AcceptanceCriteria != "" {
 		addBlank()
-		add(ui.SectionHeaderStyle.Render("ACCEPTANCE CRITERIA"))
-		add(ui.TableHeaderStyle.Width(contentWidth).Render(""))
-		for _, line := range wrapText(issue.AcceptanceCriteria, contentWidth) {
-			add(line)
-		}
+		d.addSection(&lines, sectionAcceptance, "ACCEPTANCE CRITERIA", issue.AcceptanceCriteria, contentWidth)
 	}
 
 	// Notes
 	if issue.Notes != "" {
 		addBlank()
-		add(ui.SectionHeaderStyle.Render("NOTES"))
-		add(ui.TableHeaderStyle.Width(contentWidth).Render(""))
-		for _, line := range wrapText(issue.Notes, contentWidth) {
-			add(line)
-		}
+		d.addSection(&lines, sectionNotes, "NOTES", issue.Notes, contentWidth)
 	}
 
-	// Dependencies
-	if len(issue.Dependencies) > 0 {
+	// Dependencies (excluding parent-child, since parent is shown above)
+	nonParentDeps := d.nonParentDeps()
+	if len(nonParentDeps) > 0 {
 		addBlank()
-		add(ui.SectionHeaderStyle.Render(fmt.Sprintf("DEPENDENCIES (%d)", len(issue.Dependencies))))
+		indicator := d.collapseIndicator(sectionDeps)
+		add(ui.SectionHeaderStyle.Render(fmt.Sprintf("%s DEPENDENCIES (%d)", indicator, len(nonParentDeps))))
 		add(ui.TableHeaderStyle.Width(contentWidth).Render(""))
-		for i, dep := range issue.Dependencies {
-			prefix := "  ├─ "
-			if i == len(issue.Dependencies)-1 {
-				prefix = "  └─ "
+		if !d.collapsed[sectionDeps] {
+			for i, dep := range nonParentDeps {
+				prefix := "  ├─ "
+				if i == len(nonParentDeps)-1 {
+					prefix = "  └─ "
+				}
+				depLine := fmt.Sprintf("%s%s  %s  %s  %s",
+					prefix,
+					dep.ID,
+					ui.StatusBadge(dep.Status),
+					ui.PriorityStyle(dep.Priority).Render(dep.PriorityString()),
+					dep.Title,
+				)
+				navItems = append(navItems, navItem{lineIndex: len(lines), issueID: dep.ID})
+				add(depLine)
 			}
-			depLine := fmt.Sprintf("%s%s [%s] %s  %s  %s",
-				prefix,
-				dep.ID,
-				dep.DependencyType,
-				dep.Title,
-				ui.StatusStyle(dep.Status).Render(dep.Status),
-				ui.PriorityStyle(dep.Priority).Render(dep.PriorityString()),
-			)
-			navItems = append(navItems, navItem{lineIndex: len(lines), issueID: dep.ID})
-			add(depLine)
 		}
 	}
 
 	// Dependents
 	if len(issue.Dependents) > 0 {
 		addBlank()
-		add(ui.SectionHeaderStyle.Render(fmt.Sprintf("DEPENDENTS (%d)", len(issue.Dependents))))
+		indicator := d.collapseIndicator(sectionDependents)
+		add(ui.SectionHeaderStyle.Render(fmt.Sprintf("%s DEPENDENTS (%d)", indicator, len(issue.Dependents))))
 		add(ui.TableHeaderStyle.Width(contentWidth).Render(""))
-		for i, dep := range issue.Dependents {
-			prefix := "  ├─ "
-			if i == len(issue.Dependents)-1 {
-				prefix = "  └─ "
+		if !d.collapsed[sectionDependents] {
+			for i, dep := range issue.Dependents {
+				prefix := "  ├─ "
+				if i == len(issue.Dependents)-1 {
+					prefix = "  └─ "
+				}
+				depLine := fmt.Sprintf("%s%s  %s  %s  %s",
+					prefix,
+					dep.ID,
+					ui.StatusBadge(dep.Status),
+					ui.PriorityStyle(dep.Priority).Render(dep.PriorityString()),
+					dep.Title,
+				)
+				navItems = append(navItems, navItem{lineIndex: len(lines), issueID: dep.ID})
+				add(depLine)
 			}
-			depLine := fmt.Sprintf("%s%s [%s] %s  %s  %s",
-				prefix,
-				dep.ID,
-				dep.DependencyType,
-				dep.Title,
-				ui.StatusStyle(dep.Status).Render(dep.Status),
-				ui.PriorityStyle(dep.Priority).Render(dep.PriorityString()),
-			)
-			navItems = append(navItems, navItem{lineIndex: len(lines), issueID: dep.ID})
-			add(depLine)
 		}
 	}
 
 	// Comments
 	if len(issue.Comments) > 0 {
 		addBlank()
-		add(ui.SectionHeaderStyle.Render(fmt.Sprintf("COMMENTS (%d)", len(issue.Comments))))
+		indicator := d.collapseIndicator(sectionComments)
+		add(ui.SectionHeaderStyle.Render(fmt.Sprintf("%s COMMENTS (%d)", indicator, len(issue.Comments))))
 		add(ui.TableHeaderStyle.Width(contentWidth).Render(""))
-		for _, c := range issue.Comments {
-			author := lipgloss.NewStyle().Bold(true).Foreground(ui.ColorCyan).Render(c.Author)
-			age := models.RelativeAge(c.CreatedAt)
-			add(fmt.Sprintf("  %s (%s ago):", author, age))
-			for _, line := range wrapText(c.Text, contentWidth-4) {
-				add("    " + line)
+		if !d.collapsed[sectionComments] {
+			for _, c := range issue.Comments {
+				author := lipgloss.NewStyle().Bold(true).Foreground(ui.ColorCyan).Render(c.Author)
+				age := models.RelativeAge(c.CreatedAt)
+				add(fmt.Sprintf("  %s (%s ago):", author, age))
+				for _, line := range wrapText(c.Text, contentWidth-4) {
+					add("    " + line)
+				}
+				addBlank()
 			}
-			addBlank()
 		}
 	}
 
@@ -385,6 +493,42 @@ func (d *DetailView) buildContent() {
 	if d.navCursor >= len(d.navItems) {
 		d.navCursor = max(-1, len(d.navItems)-1)
 	}
+}
+
+// addSection renders a collapsible text section (description, notes, etc.).
+func (d *DetailView) addSection(lines *[]string, kind sectionKind, title, text string, contentWidth int) {
+	indicator := d.collapseIndicator(kind)
+	*lines = append(*lines, ui.SectionHeaderStyle.Render(fmt.Sprintf("%s %s", indicator, title)))
+	*lines = append(*lines, ui.TableHeaderStyle.Width(contentWidth).Render(""))
+	if !d.collapsed[kind] {
+		for _, line := range wrapText(text, contentWidth) {
+			*lines = append(*lines, line)
+		}
+	}
+}
+
+// collapseIndicator returns a visual indicator for collapsed/expanded state.
+func (d *DetailView) collapseIndicator(kind sectionKind) string {
+	if d.collapsed[kind] {
+		return lipgloss.NewStyle().Foreground(ui.ColorGray).Render("▶")
+	}
+	return lipgloss.NewStyle().Foreground(ui.ColorGray).Render("▼")
+}
+
+// nonParentDeps returns dependencies that aren't the parent-child link
+// (since parent is shown separately as a navigable field).
+func (d *DetailView) nonParentDeps() []*models.IssueWithDepType {
+	if d.issue == nil {
+		return nil
+	}
+	var result []*models.IssueWithDepType
+	for _, dep := range d.issue.Dependencies {
+		if dep.DependencyType == "parent-child" && d.issue.Parent != nil && dep.ID == *d.issue.Parent {
+			continue
+		}
+		result = append(result, dep)
+	}
+	return result
 }
 
 func (d *DetailView) renderContent() string {
@@ -431,6 +575,7 @@ func (d *DetailView) renderStatusBar() string {
 		{"j/k", "scroll"},
 		{"tab", "next dep"},
 		{"enter", "drill in"},
+		{"x", "collapse"},
 		{"g/G", "top/bottom"},
 		{"r", "refresh"},
 		{"y", "copy ID"},
@@ -443,6 +588,23 @@ func (d *DetailView) renderStatusBar() string {
 	}
 	bar := strings.Join(parts, "  ")
 	return ui.StatusBarStyle.Width(d.width).Render(bar)
+}
+
+// formatDuration formats a duration as a human-readable string like "2d 4h".
+func formatDuration(d time.Duration) string {
+	hours := int(d.Hours())
+	if hours < 1 {
+		return fmt.Sprintf("%dm", int(d.Minutes()))
+	}
+	if hours < 24 {
+		return fmt.Sprintf("%dh", hours)
+	}
+	days := hours / 24
+	rh := hours % 24
+	if rh > 0 {
+		return fmt.Sprintf("%dd %dh", days, rh)
+	}
+	return fmt.Sprintf("%dd", days)
 }
 
 // wrapText splits text into lines, preserving existing newlines
