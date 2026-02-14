@@ -458,32 +458,14 @@ func statusOrder(s string) int {
 }
 
 func (l *ListView) visibleRows() int {
-	// Compute overhead dynamically: render the header and status bar at the
-	// current width, count their actual lines (Lipgloss wraps long content),
-	// then add the table header (2 lines: text + border).
-	overhead := l.headerHeight() + 2 + l.statusBarHeight()
+	// Measure actual rendered chrome to account for wrapping at narrow widths.
+	// The table header (text + BorderBottom) is always 2 lines.
+	tblHdr := ui.TableHeaderStyle.Width(l.width).Render("")
+	chrome := []string{l.renderHeader(), tblHdr, l.renderStatusBar()}
 	if l.filtering {
-		overhead++
+		chrome = append(chrome, " ") // filter bar is always 1 line
 	}
-	return max(1, l.height-overhead)
-}
-
-// headerHeight returns the number of terminal lines the header occupies at the
-// current width.
-func (l *ListView) headerHeight() int {
-	if l.width <= 0 {
-		return 1
-	}
-	return lipgloss.Height(l.renderHeader())
-}
-
-// statusBarHeight returns the number of terminal lines the status bar occupies
-// at the current width.
-func (l *ListView) statusBarHeight() int {
-	if l.width <= 0 {
-		return 1
-	}
-	return lipgloss.Height(l.renderStatusBar())
+	return ui.ContentHeight(l.height, chrome...)
 }
 
 func (l *ListView) ensureVisible() {

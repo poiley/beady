@@ -173,3 +173,23 @@ func TypeStyle(issueType string) lipgloss.Style {
 		return lipgloss.NewStyle().Foreground(ColorWhite)
 	}
 }
+
+// ContentHeight computes how many lines remain for scrollable content after
+// subtracting the rendered chrome. Each chrome argument is an already-rendered
+// string whose actual line count is measured with lipgloss.Height, so wrapping
+// at narrow terminal widths is handled automatically.
+//
+// Both the list and detail views use this so there is a single place to get
+// the arithmetic right.
+//
+//	vis := ui.ContentHeight(terminalHeight, renderedHeader, renderedStatusBar)
+func ContentHeight(totalHeight int, chrome ...string) int {
+	overhead := 0
+	for _, s := range chrome {
+		overhead += lipgloss.Height(s)
+	}
+	if n := totalHeight - overhead; n > 0 {
+		return n
+	}
+	return 1
+}

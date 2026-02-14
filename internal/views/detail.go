@@ -149,16 +149,16 @@ func (d *DetailView) scrollToNav() {
 }
 
 func (d *DetailView) visibleLines() int {
-	// header(1) + border(2) + status bar(1)
-	return max(1, d.height-4)
+	return ui.ContentHeight(d.height, d.renderHeaderChrome(), d.renderStatusBar())
 }
 
 // View renders the detail view.
 func (d *DetailView) View() string {
+	vis := d.visibleLines()
 	var b strings.Builder
 
-	// Header
-	b.WriteString(d.renderHeader())
+	// Header (with scroll info that depends on vis)
+	b.WriteString(d.renderHeader(vis))
 	b.WriteString("\n")
 
 	// Content area
@@ -171,7 +171,23 @@ func (d *DetailView) View() string {
 	return b.String()
 }
 
-func (d *DetailView) renderHeader() string {
+// renderHeaderChrome returns the header without scroll info, used only for
+// measuring the header's height (avoids recursion with visibleLines).
+func (d *DetailView) renderHeaderChrome() string {
+	if d.issue == nil {
+		return ui.HeaderStyle.Width(d.width).Render("(no issue)")
+	}
+	issue := d.issue
+	left := fmt.Sprintf("%s  %s  %s  %s",
+		ui.LogoStyle.Render(issue.ID),
+		ui.PriorityStyle(issue.Priority).Render(issue.PriorityString()),
+		ui.StatusStyle(issue.Status).Render(issue.Status),
+		ui.TypeStyle(issue.IssueType).Render(issue.IssueType),
+	)
+	return ui.HeaderStyle.Width(d.width).Render(left)
+}
+
+func (d *DetailView) renderHeader(vis int) string {
 	if d.issue == nil {
 		return ui.HeaderStyle.Width(d.width).Render("(no issue)")
 	}
@@ -185,9 +201,9 @@ func (d *DetailView) renderHeader() string {
 	left := fmt.Sprintf("%s  %s  %s  %s", id, pri, status, itype)
 
 	scrollInfo := ""
-	if len(d.lines) > d.visibleLines() {
+	if len(d.lines) > vis {
 		pct := 0
-		maxScroll := len(d.lines) - d.visibleLines()
+		maxScroll := len(d.lines) - vis
 		if maxScroll > 0 {
 			pct = d.scroll * 100 / maxScroll
 		}
@@ -385,27 +401,22 @@ func (d *DetailView) renderContent() string {
 		highlightLine = d.navItems[d.navCursor].lineIndex
 	}
 
-	visible := make([]string, 0, end-start)
+	// Horizontal padding applied per-line to avoid lipgloss re-wrapping
+	// content that's already been sized to contentWidth.
+	pad := "  "
+	visible := make([]string, 0, vis)
 	for i := start; i < end; i++ {
 		line := d.lines[i]
 		if i == highlightLine {
 			line = ui.SelectedRowStyle.Width(d.width - 4).Render(line)
 		}
-		visible = append(visible, line)
+		visible = append(visible, pad+line)
 	}
-	content := strings.Join(visible, "\n")
-
-	// Pad to fill space
-	rendered := len(visible)
-	for rendered < vis {
-		content += "\n"
-		rendered++
+	// Pad remaining space with empty lines.
+	for len(visible) < vis {
+		visible = append(visible, "")
 	}
-
-	return lipgloss.NewStyle().
-		Width(d.width).
-		Padding(0, 2).
-		Render(content)
+	return strings.Join(visible, "\n")
 }
 
 func (d *DetailView) renderStatusBar() string {
