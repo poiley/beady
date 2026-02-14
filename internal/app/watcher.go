@@ -9,17 +9,26 @@ import (
 	"github.com/fsnotify/fsnotify"
 )
 
-const debounceDelay = 500 * time.Millisecond
+const (
+	debounceDelay = 500 * time.Millisecond
+	pollInterval  = 3 * time.Second
+)
 
 // fileChangedMsg signals that the beads database has been modified on disk.
 type fileChangedMsg struct{}
 
 // dbWatcher watches the .beads/ directory for SQLite database changes
 // and emits fileChangedMsg via a channel that Bubble Tea can consume.
+//
+// Uses a hybrid approach: fsnotify for near-instant detection of local
+// mutations, plus a polling fallback (stat-based) every 3 seconds to
+// catch edge cases where fsnotify misses events (WAL checkpoint file
+// recreation, remote daemon syncs, etc.).
 type dbWatcher struct {
-	watcher *fsnotify.Watcher
-	events  chan struct{} // debounced change signal
-	done    chan struct{} // signals shutdown
+	watcher  *fsnotify.Watcher
+	events   chan struct{} // debounced change signal
+	done     chan struct{} // signals shutdown
+	beadsDir string        // path to .beads/ directory
 }
 
 // newDBWatcher creates a watcher on the beads SQLite database files.
@@ -39,9 +48,10 @@ func newDBWatcher(workDir string) *dbWatcher {
 	}
 
 	dw := &dbWatcher{
-		watcher: w,
-		events:  make(chan struct{}, 1),
-		done:    make(chan struct{}),
+		watcher:  w,
+		events:   make(chan struct{}, 1),
+		done:     make(chan struct{}),
+		beadsDir: beadsDir,
 	}
 
 	// Watch individual DB files if they exist. The WAL file is the primary
@@ -58,13 +68,14 @@ func newDBWatcher(workDir string) *dbWatcher {
 	// (e.g., after a checkpoint removes and recreates the WAL).
 	_ = w.Add(beadsDir)
 
-	go dw.loop()
+	go dw.fsnotifyLoop()
+	go dw.pollLoop()
 
 	return dw
 }
 
-// loop runs the debounced event processing goroutine.
-func (dw *dbWatcher) loop() {
+// fsnotifyLoop runs the debounced fsnotify event processing goroutine.
+func (dw *dbWatcher) fsnotifyLoop() {
 	var timer *time.Timer
 	var timerC <-chan time.Time
 
@@ -108,18 +119,14 @@ func (dw *dbWatcher) loop() {
 			// Debounce window expired — emit a single change event
 			timer = nil
 			timerC = nil
-			select {
-			case dw.events <- struct{}{}:
-			default:
-				// Channel already has a pending event, skip
-			}
+			dw.notify()
 
 		case _, ok := <-dw.watcher.Errors:
 			if !ok {
 				return
 			}
-			// Ignore watch errors silently — worst case we miss an update
-			// and the user presses 'r' manually.
+			// Ignore watch errors silently — worst case the poll loop
+			// picks up the change within pollInterval.
 
 		case <-dw.done:
 			if timer != nil {
@@ -127,6 +134,51 @@ func (dw *dbWatcher) loop() {
 			}
 			return
 		}
+	}
+}
+
+// pollLoop periodically stats the DB files and emits a change event if
+// modification times have changed. This catches any changes that fsnotify
+// misses (WAL recreation, remote daemon writes, platform quirks, etc.).
+func (dw *dbWatcher) pollLoop() {
+	lastMod := dw.dbModTime()
+	ticker := time.NewTicker(pollInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ticker.C:
+			mod := dw.dbModTime()
+			if mod != lastMod {
+				lastMod = mod
+				dw.notify()
+			}
+		case <-dw.done:
+			return
+		}
+	}
+}
+
+// dbModTime returns the latest modification time across the DB and WAL files.
+// Returns zero time if neither file can be stat'd.
+func (dw *dbWatcher) dbModTime() time.Time {
+	var latest time.Time
+	for _, name := range []string{"beads.db", "beads.db-wal"} {
+		if info, err := os.Stat(filepath.Join(dw.beadsDir, name)); err == nil {
+			if t := info.ModTime(); t.After(latest) {
+				latest = t
+			}
+		}
+	}
+	return latest
+}
+
+// notify sends a change event to the events channel (non-blocking).
+func (dw *dbWatcher) notify() {
+	select {
+	case dw.events <- struct{}{}:
+	default:
+		// Channel already has a pending event, skip
 	}
 }
 
