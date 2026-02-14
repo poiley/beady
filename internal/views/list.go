@@ -556,7 +556,8 @@ const (
 	colIdxTitle    = 5
 	colIdxAssignee = 6
 	colIdxAge      = 7
-	colIdxDeps     = 8
+	colIdxCmt      = 8
+	colIdxDeps     = 9
 )
 
 func (l *ListView) renderTable() string {
@@ -584,13 +585,14 @@ func (l *ListView) renderTable() string {
 		&ui.Column{Header: "TITLE", Size: ui.SizeFlex, Align: ui.AlignLeft, Min: 10},
 		&ui.Column{Header: "ASSIGNEE", Size: ui.SizeFit, Align: ui.AlignRight, Min: 1, Max: 14},
 		&ui.Column{Header: "AGE", Size: ui.SizeFit, Align: ui.AlignRight, Min: 3, Max: 5},
+		&ui.Column{Header: "CMT", Size: ui.SizeFit, Align: ui.AlignRight, Min: 1, Max: 4},
 		&ui.Column{Header: "DEPS", Size: ui.SizeFit, Align: ui.AlignRight, Min: 4, Max: 7},
 	)
 	tbl.Gap = 1
 
 	// Scan data to compute max display widths per column (for SizeFit columns).
 	// Uses ui.StringWidth to correctly handle wide/multi-byte characters.
-	dataWidths := make([]int, 9)
+	dataWidths := make([]int, 10)
 	for _, issue := range l.filtered {
 		if n := ui.StringWidth(issue.ID); n > dataWidths[colIdxID] {
 			dataWidths[colIdxID] = n
@@ -619,6 +621,13 @@ func (l *ListView) renderTable() string {
 		if n := ui.StringWidth(age); n > dataWidths[colIdxAge] {
 			dataWidths[colIdxAge] = n
 		}
+		cmt := ""
+		if issue.CommentCount > 0 {
+			cmt = fmt.Sprintf("%d", issue.CommentCount)
+		}
+		if n := ui.StringWidth(cmt); n > dataWidths[colIdxCmt] {
+			dataWidths[colIdxCmt] = n
+		}
 		deps := ""
 		if issue.DependencyCount > 0 || issue.DependentCount > 0 {
 			deps = fmt.Sprintf("%d/%d", issue.DependencyCount, issue.DependentCount)
@@ -637,7 +646,7 @@ func (l *ListView) renderTable() string {
 	tbl.Resolve(l.width-cursorWidth, dataWidths)
 
 	// Render header row.
-	headers := make([]string, 9)
+	headers := make([]string, 10)
 	for i, col := range tbl.Columns {
 		headers[i] = col.Header
 	}
@@ -668,6 +677,10 @@ func (l *ListView) renderTable() string {
 			closedCount := l.closedChildrenCount[issue.ID]
 			done = fmt.Sprintf("%d/%d", closedCount, issue.DependentCount)
 		}
+		cmt := ""
+		if issue.CommentCount > 0 {
+			cmt = fmt.Sprintf("%d", issue.CommentCount)
+		}
 		deps := ""
 		if issue.DependencyCount > 0 || issue.DependentCount > 0 {
 			deps = fmt.Sprintf("%d/%d", issue.DependencyCount, issue.DependentCount)
@@ -682,6 +695,7 @@ func (l *ListView) renderTable() string {
 			issue.Title,
 			assignee,
 			models.RelativeAge(issue.CreatedAt),
+			cmt,
 			deps,
 		}
 
