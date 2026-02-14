@@ -458,15 +458,32 @@ func statusOrder(s string) int {
 }
 
 func (l *ListView) visibleRows() int {
-	// The View output has these lines:
-	//   header(1) + table header text(1) + table border(1) + vis data rows + status bar(1)
-	// The \n separators between these sections don't add extra lines — they
-	// just separate adjacent content. Total = vis + 4, so overhead = 4.
-	overhead := 4
+	// Compute overhead dynamically: render the header and status bar at the
+	// current width, count their actual lines (Lipgloss wraps long content),
+	// then add the table header (2 lines: text + border).
+	overhead := l.headerHeight() + 2 + l.statusBarHeight()
 	if l.filtering {
 		overhead++
 	}
 	return max(1, l.height-overhead)
+}
+
+// headerHeight returns the number of terminal lines the header occupies at the
+// current width.
+func (l *ListView) headerHeight() int {
+	if l.width <= 0 {
+		return 1
+	}
+	return lipgloss.Height(l.renderHeader())
+}
+
+// statusBarHeight returns the number of terminal lines the status bar occupies
+// at the current width.
+func (l *ListView) statusBarHeight() int {
+	if l.width <= 0 {
+		return 1
+	}
+	return lipgloss.Height(l.renderStatusBar())
 }
 
 func (l *ListView) ensureVisible() {
