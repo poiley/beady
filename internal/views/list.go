@@ -563,7 +563,7 @@ func (l *ListView) renderTable() string {
 		&ui.Column{Header: "TITLE", Size: ui.SizeFlex, Align: ui.AlignLeft, Min: 10},
 		&ui.Column{Header: "ASSIGNEE", Size: ui.SizeFit, Align: ui.AlignRight, Min: 1, Max: 14},
 		&ui.Column{Header: "AGE", Size: ui.SizeFit, Align: ui.AlignRight, Min: 3, Max: 5},
-		&ui.Column{Header: "↑/↓", Size: ui.SizeFit, Align: ui.AlignRight, Min: 4, Max: 7},
+		&ui.Column{Header: "DEPS", Size: ui.SizeFit, Align: ui.AlignRight, Min: 4, Max: 7},
 	)
 	tbl.Gap = 1
 
