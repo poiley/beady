@@ -369,20 +369,25 @@ func wrapText(text string, maxWidth int) []string {
 }
 
 func wrapLine(line string, maxWidth int) []string {
-	if len(line) <= maxWidth {
+	if ui.StringWidth(line) <= maxWidth {
 		return []string{line}
 	}
 	var result []string
 	words := strings.Fields(line)
 	current := ""
+	currentWidth := 0
 	for _, word := range words {
+		wordWidth := ui.StringWidth(word)
 		if current == "" {
 			current = word
-		} else if len(current)+1+len(word) <= maxWidth {
+			currentWidth = wordWidth
+		} else if currentWidth+1+wordWidth <= maxWidth {
 			current += " " + word
+			currentWidth += 1 + wordWidth
 		} else {
 			result = append(result, current)
 			current = word
+			currentWidth = wordWidth
 		}
 	}
 	if current != "" {
