@@ -434,8 +434,8 @@ func statusOrder(s string) int {
 }
 
 func (l *ListView) visibleRows() int {
-	// header(3) + table header(1) + status bar(1) + filter bar if active(1)
-	overhead := 5
+	// header(1) + newline(1) + table header with border(2) + newline(1) + status bar(1)
+	overhead := 6
 	if l.filtering {
 		overhead++
 	}
